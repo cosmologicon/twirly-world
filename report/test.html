@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<script>
+/* Things I probably want to check:
+
+check JS features in strict mode
+
+strict mode
+
+localStorage
+Push API
+ES6 Number
+asm.js
+const
+rest parameters
+arrow functions
+let
+Function.bind
+Array.indexOf, forEach, map, filter
+Object.keys
+String.trim
+JSON.parse
+web MIDI API
+Fetch
+BroadcastChannel
+online/offline events, navigator.onLine
+screen orientation
+gamepad API
+CSS font loading
+crypto.getRandomValues
+User Timing API
+performance.now
+Battery Status API
+Vibration API
+Promises
+clipboard API
+Channel messaging
+page visibility
+requestAnimationFrame
+fullscreen API
+Web Audio API
+DeviceOrientation + DeviceMotion
+Blob URLs
+TypedArrays
+FileReader API
+Blob constructor
+web notifications
+web workers
+postMessage
+EventSource interface
+IndexedDB
+geolocation
+Shared web workers
+CORS
+web sockets
+File API
+
+
+canvas context
+webGL
+webGL 2.0
+
+
+
+*/
+
+var report = {
+	runtests: {
+		context2d: function () {
+			var canvas = document.createElement("canvas")
+			var context = canvas.getContext("2d")
+			if (!context) throw "Context not initialized"
+		},
+		contextwebgl: function () {
+			var canvas = document.createElement("canvas")
+			var gl = canvas.getContext("webgl")
+			if (!gl) throw "Context not initialized"
+		},
+		contextwebglexperimental: function () {
+			var canvas = document.createElement("canvas")
+			var gl = canvas.getContext("experimental-webgl")
+			if (!gl) throw "Context not initialized"
+		},
+	},
+	evaltests: {
+		arrow: "(a => a)(1)",
+	},
+	glvaltests: {
+		shaderprecision: function (gl) {
+			var stypes = { vertex: gl.VERTEX_SHADER, fragment: gl.FRAGMENT_SHADER, }
+			var ptypes = {
+				lowf: gl.LOW_FLOAT, mediumf: gl.MEDIUM_FLOAT, highf: gl.HIGH_FLOAT,
+				lowi: gl.LOW_INT, mediumi: gl.MEDIUM_INT, highi: gl.HIGH_INT,
+			}
+			var ret = {}
+			for (var s in stypes) {
+				for (var p in ptypes) {
+					var sp = gl.getShaderPrecisionFormat(stypes[s], ptypes[p])
+					ret[s + "-" + p] = {
+						rangeMin: sp.rangeMin,
+						rangeMax: sp.rangeMax,
+						precision: sp.precision,
+					}
+				}
+			}
+			return ret
+		},
+	},
+	exceptioninfo: function (e) {
+		return e.message
+	},
+	testrun: function () {
+		var ret = {}
+		for (var testname in this.runtests) {
+			var test = this.runtests[testname]
+			try {
+				test()
+				ret[testname] = {
+					pass: true,
+				}
+			} catch (e) {
+				ret[testname] = {
+					pass: false,
+					exception: e,
+				}
+			}
+		}
+		return ret
+	},
+	testeval: function () {
+		var ret = {}
+		for (var testname in this.evaltests) {
+			var test = this.evaltests[testname]
+			try {
+				ret[testname] = {
+					pass: true,
+					value: eval(test),
+				}
+			} catch (e) {
+				ret[testname] = {
+					pass: false,
+					exception: e,
+				}
+			}
+		}
+		return ret
+	},
+	testglval: function () {
+		var ret = {}
+		var canvas = document.createElement("canvas")
+		var gl = canvas.getContext("webgl") || canvas.getContext("experimental-webgl")
+		if (!gl) return ret
+		for (var testname in this.glvaltests) {
+			var test = this.glvaltests[testname]
+			try {
+				ret[testname] = {
+					pass: true,
+					value: test(gl),
+				}
+			} catch (e) {
+				ret[testname] = {
+					pass: false,
+					exception: e,
+				}
+			} 
+		}
+		return ret
+	},
+}
+
+
+
+</script>
+
