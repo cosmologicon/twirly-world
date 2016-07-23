@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<title>Twirling shader test</title>
+<script src="../../UFX/src/gl.js"></script>
+<script src="../../UFX/src/gltext.js"></script>
+<script src="../../UFX/src/ticker.js"></script>
+<script src="../../UFX/src/resource.js"></script>
+<script src="../../UFX/src/mouse.js"></script>
+<script src="../../UFX/src/key.js"></script>
+<script src="quaternion.js"></script>
+
+<script type="x-shader/x-vertex" id=vtwirl0>
+// program twirl0
+// Rotation around the z-axis
+attribute vec3 pos0;  // position of the axis set point
+attribute vec4 axis1;  // axis1.w is the multiplier
+attribute vec3 dpos1;
+attribute vec3 normal;
+attribute vec3 color;
+uniform float theta;
+
+mat3 outerProduct(vec3 a, vec3 b) {
+	return mat3(
+		a.x * b.x, a.x * b.y, a.x * b.z,
+		a.y * b.x, a.y * b.y, a.y * b.z,
+		a.z * b.x, a.z * b.y, a.z * b.z
+	);
+}
+mat3 R(vec3 u, float angle) {
+	float S = sin(angle), C = cos(angle), dC = 1.0 - C;
+	return mat3(C) + S * mat3(0.0, u.z, -u.y, -u.z, 0.0, u.x, u.y, -u.x, 0.0) + dC * outerProduct(u, u);
+}
+
+varying vec3 tnormal, tcolor;
+
+void main() {
+	mat3 R1 = R(axis1.xyz, theta * axis1.w);
+	gl_Position = vec4(pos0 + R1 * dpos1, 1.0);
+	tnormal = R1 * normal;
+	tcolor = color;
+}
+</script>
+<script type="x-shader/x-fragment" id=ftwirl0>
+precision highp float;
+varying vec3 tnormal, tcolor;
+
+const vec3 lightpos = normalize(vec3(1.0, -1.0, -1.0));
+void main() {
+	float shade = clamp(0.4 + 0.3 * dot(tnormal, lightpos), 0.1, 1.0);
+	gl_FragColor = vec4(tcolor * shade, 1.0);
+}
+</script>
+<canvas id=canvas></canvas>
+<script>
+"use strict"
+var tau = 2 * Math.PI
+var canvas = document.getElementById("canvas")
+canvas.width = canvas.height = 700
+var gl = UFX.gl(canvas)
+gl.clearColor(0, 0, 0, 1)
+gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
+gl.enable(gl.DEPTH_TEST)
+gl.disable(gl.BLEND)
+
+gl.addProgram("twirl0", "vtwirl0", "ftwirl0")
+
+
+var V = {
+	0: [0, 0, 0],
+	i: [1, 0, 0],
+	j: [0, 1, 0],
+	k: [0, 0, 1],
+	plus: function (v1, v2) {
+		var [x1, y1, z1] = v1, [x2, y2, z2] = v2
+		return [x1 + x2, y1 + y2, z1 + z2]
+	},
+	times: function (a, v) {
+		var [x, y, z] = v
+		return [a * x, a * y, a * z]
+	},
+	lin: function (a, v1, b, v2) {
+		return V.plus(V.times(a, v1), V.times(b, v2))
+	},
+	cross: function (v1, v2) {
+		var [x1, y1, z1] = v1, [x2, y2, z2] = v2
+		return [y1 * z2 - y2 * z1, z1 * x2 - z2 * x1, x1 * y2 - x2 * y1]
+	},
+	norm: function (v) {
+		var [x, y, z] = v
+		if (x == 0 && y == 0 && z == 0) return [0, 0, 1]
+		var d = Math.sqrt(x * x + y * y + z * z)
+		return [x / d, y / d, z / d]
+	},
+	perps: function (v) {
+		var [x, y, z] = v, vc
+		if (x == 0 && y == 0) {
+			if (z == 0) return [[1, 0, 0], [0, 1, 0]]
+			vc = [1, 0, 0]
+		} else {
+			vc = [0, 0, 1]
+		}
+		var v1 = V.norm(V.cross(v, vc))
+		var v2 = V.norm(V.cross(v1, v))
+		return [v1, v2]
+	},
+}
+
+
+
+// rotational axis-aligned cylinder
+function cylinder(p0, axis1, h0, h1, r, n, smooth) {
+	var points = []
+	var [ux, uy] = V.perps(axis1)
+	var pbase = []
+	for (var jface = 0 ; jface < n ; ++jface) {
+		var phi = jface * tau / n
+		pbase.push(V.lin(Math.cos(phi), ux, Math.sin(phi), uy))
+	}
+	var dp0 = V.times(h0, axis1), dp1 = V.times(h1, axis1), naxis1 = V.times(-1, axis1)
+	for (var jface = 0 ; jface < n ; ++jface) {
+		var kface = (jface + 1) % n
+		var pj0 = V.lin(1, p0, r, pbase[jface])
+		var pk0 = V.lin(1, p0, r, pbase[kface])
+		var nj = pbase[jface], nk = pbase[kface]
+		if (!smooth) {
+			var navg = V.norm(V.plus(nj, nk))
+			nj = nk = navg
+		}
+		var a0 = V.plus(pj0, dp0).concat(nj)
+		var a1 = V.plus(pk0, dp0).concat(nk)
+		var a2 = V.plus(pk0, dp1).concat(nk)
+		var a3 = V.plus(pj0, dp1).concat(nj)
+		var b0 = V.plus(pj0, dp1).concat(axis1)
+		var b1 = V.plus(pk0, dp1).concat(axis1)
+		var b2 = V.plus(p0, dp1).concat(axis1)
+		var c0 = V.plus(pj0, dp0).concat(naxis1)
+		var c1 = V.plus(pk0, dp0).concat(naxis1)
+		var c2 = V.plus(p0, dp0).concat(naxis1)
+		points.push(a0, a1, a2, a0, a2, a3, b0, b1, b2, c0, c2, c1)
+	}
+	return points
+}
+
+var data = [], nvertex = 0, axis = V.norm([0, 3, -1])
+cylinder(V["0"], axis, 0.2, 0.4, 0.1, 6, false).forEach(function (p) {
+	var pos0 = V["0"], axis1 = axis.concat([3]), color = [1, 1, 0]
+	data = data.concat(pos0, axis1, p, color)
+	nvertex += 1
+})
+cylinder(V["0"], axis, 0, 0.2, 0.2, 12, false).forEach(function (p) {
+	var pos0 = V["0"], axis1 = axis.concat([7]), color = [1, 0, 1]
+	data = data.concat(pos0, axis1, p, color)
+	nvertex += 1
+})
+var [axis2, axis3] = V.perps(axis)
+cylinder(V.times(0.1, axis), axis2, -0.5, 0.5, 0.03, 8, true).forEach(function (p) {
+	var pos0 = V["0"], axis1 = axis.concat([3]), color = [0, 1, 1]
+	data = data.concat(pos0, axis1, p, color)
+	nvertex += 1
+})
+cylinder(V.times(0.1, axis), axis3, -0.5, 0.5, 0.03, 8, true).forEach(function (p) {
+	var pos0 = V["0"], axis1 = axis.concat([-4]), color = [0, 1, 1]
+	data = data.concat(pos0, axis1, p, color)
+	nvertex += 1
+})
+var buffer = gl.makeArrayBuffer(data)
+
+gl.progs.twirl0.assignAttribOffsets({
+	pos0: 0,
+	axis1: 3,
+	dpos1: 7,
+	normal: 10,
+	color: 13,
+})
+
+
+var theta = 0
+UFX.ticker.init(function (dt) {
+	theta += 0.2 * dt
+	theta %= tau
+	gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
+	gl.progs.twirl0.use()
+	buffer.bind()
+	gl.progs.twirl0.set({
+		theta: theta,
+	})
+	gl.drawArrays(gl.TRIANGLES, 0, nvertex)
+})
+
+
+
+</script>
