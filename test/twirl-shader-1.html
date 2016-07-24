@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<title>Twirling shader test 1</title>
+<script src="../../UFX/src/gl.js"></script>
+<script src="../../UFX/src/gltext.js"></script>
+<script src="../../UFX/src/ticker.js"></script>
+<script src="../../UFX/src/resource.js"></script>
+<script src="../../UFX/src/mouse.js"></script>
+<script src="../../UFX/src/key.js"></script>
+<script src="quaternion.js"></script>
+
+<script type="x-shader/x-vertex" id=vtwirl1>
+// program twirl1
+attribute vec3 pos0;  // position of the axis set point
+attribute vec4 axis1;  // axis1.w is the multiplier
+attribute vec3 dpos1;
+attribute vec4 axis2;  // axis2.w is the multiplier
+attribute vec3 dpos2;
+
+attribute vec3 normal;
+attribute vec3 color;
+uniform float theta;
+
+uniform mat3 Rview;
+
+mat3 outerProduct(vec3 a, vec3 b) {
+	return mat3(
+		a.x * b.x, a.x * b.y, a.x * b.z,
+		a.y * b.x, a.y * b.y, a.y * b.z,
+		a.z * b.x, a.z * b.y, a.z * b.z
+	);
+}
+// (u, angle) = ((0, 0, 0), 0) *should* return the identity matrix.
+mat3 R(vec3 u, float angle) {
+	float S = sin(angle), C = cos(angle), dC = 1.0 - C;
+	return mat3(C) + S * mat3(0.0, u.z, -u.y, -u.z, 0.0, u.x, u.y, -u.x, 0.0) + dC * outerProduct(u, u);
+}
+
+varying vec3 tnormal, tcolor;
+
+void main() {
+	mat3 R1 = R(axis1.xyz, theta * axis1.w);
+	mat3 R2 = R(axis2.xyz, theta * axis2.w);
+	gl_Position = vec4(Rview * (pos0 + R1 * (dpos1 + R2 * dpos2)), 1.0);
+	tnormal = R1 * R2 * normal;
+	tcolor = color;
+}
+</script>
+<script type="x-shader/x-fragment" id=ftwirl1>
+precision highp float;
+varying vec3 tnormal, tcolor;
+
+const vec3 lightpos = normalize(vec3(1.0, 1.0, 1.0));
+void main() {
+	float shade = clamp(0.4 + 0.3 * dot(tnormal, lightpos), 0.1, 1.0);
+	gl_FragColor = vec4(tcolor * shade, 1.0);
+}
+</script>
+<canvas id=canvas></canvas>
+<script>
+"use strict"
+var tau = 2 * Math.PI
+var canvas = document.getElementById("canvas")
+canvas.width = canvas.height = 700
+var gl = UFX.gl(canvas)
+UFX.gltext.init(gl)
+gl.clearColor(0.5, 0.5, 0.8, 1)
+gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
+gl.enable(gl.DEPTH_TEST)
+gl.disable(gl.BLEND)
+
+gl.addProgram("twirl1", "vtwirl1", "ftwirl1")
+
+
+function cylinder(p0, axis1, h0, h1, r, n, smooth) {
+	var points = []
+	var [ux, uy] = V.perps(axis1)
+	var pbase = []
+	for (var jface = 0 ; jface < n ; ++jface) {
+		var phi = jface * tau / n
+		pbase.push(V.lin(Math.cos(phi), ux, Math.sin(phi), uy))
+	}
+	var dp0 = V.times(h0, axis1), dp1 = V.times(h1, axis1), naxis1 = V.times(-1, axis1)
+	for (var jface = 0 ; jface < n ; ++jface) {
+		var kface = (jface + 1) % n
+		var pj0 = V.lin(1, p0, r, pbase[jface])
+		var pk0 = V.lin(1, p0, r, pbase[kface])
+		var nj = pbase[jface], nk = pbase[kface]
+		if (!smooth) {
+			var navg = V.norm(V.plus(nj, nk))
+			nj = nk = navg
+		}
+		var a0 = V.plus(pj0, dp0).concat(nj)
+		var a1 = V.plus(pk0, dp0).concat(nk)
+		var a2 = V.plus(pk0, dp1).concat(nk)
+		var a3 = V.plus(pj0, dp1).concat(nj)
+		var b0 = V.plus(pj0, dp1).concat(axis1)
+		var b1 = V.plus(pk0, dp1).concat(axis1)
+		var b2 = V.plus(p0, dp1).concat(axis1)
+		var c0 = V.plus(pj0, dp0).concat(naxis1)
+		var c1 = V.plus(pk0, dp0).concat(naxis1)
+		var c2 = V.plus(p0, dp0).concat(naxis1)
+		points.push(a0, a1, a2, a0, a2, a3, b0, b1, b2, c0, c2, c1)
+	}
+	return points
+}
+
+var data = [], nvertex = 0, axis0 = V.k, nullrot = [0, 0, 0, 0, 0, 0, 0]
+cylinder(V["0"], axis0, -0.5, 0.5, 0.1, 8, false).forEach(function (p) {
+	var pos0 = V["0"], color = [1, 1, 0], dpos1 = p.slice(0, 3), normal = p.slice(3, 6)
+	data = data.concat(pos0, axis0, [2], dpos1, nullrot, normal, color)
+	nvertex += 1
+})
+cylinder(V["0"], axis0, -0.4, 0.4, 0.12, 8, false).forEach(function (p) {
+	var pos0 = V["0"], color = [0.5, 0, 1], dpos1 = p.slice(0, 3), normal = p.slice(3, 6)
+	data = data.concat(pos0, axis0, [2], dpos1, nullrot, normal, color)
+	nvertex += 1
+})
+for (var jbeta = 0 ; jbeta < 4 ; ++jbeta) {
+	var beta = jbeta / 4 * tau, pos0 = [0.2 * Math.cos(beta), 0.2 * Math.sin(beta), -0.4]
+	cylinder(pos0, axis0, 0, 0.2, 0.06, 4, false).forEach(function (p) {
+		var pos0 = V["0"], color = [1, 0, 0.5], dpos1 = p.slice(0, 3), normal = p.slice(3, 6)
+		data = data.concat(pos0, axis0, [7], dpos1, nullrot, normal, color)
+		nvertex += 1
+	})
+}
+for (var jbeta = 0 ; jbeta < 4 ; ++jbeta) {
+	var beta = jbeta / 4 * tau
+	var pos0 = V["0"]
+	var color = [0, 1, 0.5]
+	var axis1 = V.k.concat([2])
+	var dpos1 = [0.3 * Math.cos(beta), 0.3 * Math.sin(beta), -0.1]
+	var axis2 = V.k.concat([-7])
+	cylinder(V["0"], V.k, 0, 0.05, 0.15, 5, false).forEach(function (p) {
+		var dpos2 = p.slice(0, 3), normal = p.slice(3, 6)
+		data = data.concat(pos0, axis1, dpos1, axis2, dpos2, normal, color)
+		nvertex += 1
+	})
+}
+for (var jbeta = 0 ; jbeta < 7 ; ++jbeta) {
+	var beta = jbeta / 7 * tau
+	var pos0 = V["0"]
+	var color = [0.5, 1, 0]
+	var axis1 = V.k.concat([-2])
+	var dpos1 = [0.1 * Math.cos(beta), 0.1 * Math.sin(beta), 0.1]
+	var axis2 = V.norm([2 * Math.cos(beta), 2 * Math.sin(beta), 1]).concat([14])
+	cylinder(V["0"], axis2.slice(0, 3), 0, 0.2, 0.05, 6, false).forEach(function (p) {
+		var dpos2 = p.slice(0, 3), normal = p.slice(3, 6)
+		data = data.concat(pos0, axis1, dpos1, axis2, dpos2, normal, color)
+		nvertex += 1
+	})
+}
+for (var jbeta = 0 ; jbeta < 4 ; ++jbeta) {
+	var beta = jbeta / 4 * tau
+	var pos0 = [0, 0, 0.4]
+	var color = [1, 0.5, 0]
+	var axis1 = V.k.concat([2])
+	var dpos1 = [0.2 * Math.cos(beta), 0.2 * Math.sin(beta), 0]
+	var axis2 = V.norm(dpos1).concat([jbeta % 2 ? -14 : 14])
+	cylinder(V["0"], axis2, 0, 0.3, 0.02, 6, true).forEach(function (p) {
+		var dpos2 = p.slice(0, 3), normal = p.slice(3, 6)
+		data = data.concat(pos0, axis1, [0, 0, 0], axis2, dpos2, normal, [0.8, 0.8, 0.8])
+		nvertex += 1
+	})
+	for (var jgamma = 0 ; jgamma < 3 ; ++jgamma) {
+		var gamma = jgamma / 3 * tau
+		var dpos02 = V.times(0.1, [Math.sin(gamma) * Math.sin(beta), Math.sin(gamma) * Math.cos(beta), Math.cos(gamma)])
+		cylinder(dpos02, axis2, 0, 0.03, 0.08, 20, true).forEach(function (p) {
+			var dpos2 = p.slice(0, 3), normal = p.slice(3, 6)
+			data = data.concat(pos0, axis1, dpos1, axis2, dpos2, normal, color)
+			nvertex += 1
+		})
+	}
+}
+var buffer = gl.makeArrayBuffer(data)
+
+var theta = 0
+UFX.ticker.init(function (dt) {
+	theta += 0.2 * dt
+	theta %= tau
+	gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
+	gl.enable(gl.DEPTH_TEST)
+	gl.progs.twirl1.use()
+	buffer.bind()
+	gl.progs.twirl1.assignAttribOffsets({
+		pos0: 0,
+		axis1: 3,
+		dpos1: 7,
+		axis2: 10,
+		dpos2: 14,
+		normal: 17,
+		color: 20,
+	})
+	gl.progs.twirl1.set({
+		theta: theta,
+		Rview: Q.rot(Q.fromaxis([1, 0, 0], 2)),
+	})
+	gl.drawArrays(gl.TRIANGLES, 0, nvertex)
+	gl.progs.text.use()
+	gl.progs.text.draw(UFX.ticker.getrates(), [10, 10], { color: "white", ocolor: "black", fontsize: 32 })
+}, null, { minups: 5, maxups: 240 })
+
+
+
+</script>
