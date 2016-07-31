@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<title>Twirling shader test 2</title>
+<script src="../../UFX/src/gl.js"></script>
+<script src="../../UFX/src/gltext.js"></script>
+<script src="../../UFX/src/ticker.js"></script>
+<script src="../../UFX/src/resource.js"></script>
+<script src="../../UFX/src/mouse.js"></script>
+<script src="../../UFX/src/key.js"></script>
+<script src="../../UFX/src/noise.js"></script>
+<script src="../../UFX/src/random.js"></script>
+<script src="quaternion.js"></script>
+<script src="isosphere.js"></script>
+
+<script type="x-shader/x-vertex" id=vmoon>
+attribute vec3 color;
+attribute vec3 p, normal;
+varying vec3 tcolor, tnormal;
+uniform mat3 Rq;
+void main() {
+	gl_Position = vec4(0.7 * (Rq * p), 1.0);
+	gl_Position.z *= 0.5;
+	tcolor = color;
+	tnormal = Rq * normal;
+}
+</script>
+<script type="x-shader/x-fragment" id=fmoon>
+precision highp float;
+varying vec3 tcolor, tnormal;
+const vec3 lightpos = normalize(vec3(1.0, 0.1, -0.4));
+void main() {
+//	float shade = 0.5 + 0.2 * clamp(3.0 * dot(tnormal, lightpos), -1.0, 1.0);
+//	gl_FragColor = vec4(shade * tcolor, 1.0);
+
+	vec3 V = vec3(0.0, 0.0, -1.0);
+	vec3 C = 0.3 * tcolor;
+	vec3 Nhat = normalize(tnormal);
+	vec3 L = lightpos;
+	vec3 R = -reflect(L, Nhat);
+	C += 0.2 * dot(L, Nhat);
+	C += 0.2 * pow(max(dot(R, V), 0.0), 8.0);
+	gl_FragColor = vec4(clamp(C, 0.0, 1.0), 1.0);
+}
+</script>
+<script type="x-shader/x-vertex" id=vtwirl2>
+attribute vec3 pos0;  // position of the axis set point
+attribute vec4 axis1;  // axis1.w is the multiplier
+attribute vec3 dpos1;
+attribute vec4 axis2;  // axis2.w is the multiplier
+attribute vec3 dpos2;
+
+attribute vec3 normal;
+attribute vec3 color;
+uniform float theta;
+
+uniform mat4 Rview;
+uniform mat3 Rnormal;
+
+mat3 outerProduct(vec3 a, vec3 b) {
+	return mat3(
+		a.x * b.x, a.x * b.y, a.x * b.z,
+		a.y * b.x, a.y * b.y, a.y * b.z,
+		a.z * b.x, a.z * b.y, a.z * b.z
+	);
+}
+// (u, angle) = ((0, 0, 0), 0) *should* return the identity matrix.
+mat3 R(vec3 u, float angle) {
+	float S = sin(angle), C = cos(angle), dC = 1.0 - C;
+	return mat3(C) + S * mat3(0.0, u.z, -u.y, -u.z, 0.0, u.x, u.y, -u.x, 0.0) + dC * outerProduct(u, u);
+}
+
+varying vec3 tnormal, tcolor;
+
+void main() {
+	mat3 R1 = R(axis1.xyz, theta * axis1.w);
+	mat3 R2 = R(axis2.xyz, theta * axis2.w);
+	vec3 pos = pos0 + R1 * (dpos1 + R2 * dpos2);
+	gl_Position = Rview * vec4(pos, 1.0);
+	gl_Position.z *= 0.5;
+	tnormal = Rnormal * R1 * R2 * normal;
+	tcolor = color;
+}
+</script>
+<script type="x-shader/x-fragment" id=ftwirl2>
+precision highp float;
+varying vec3 tnormal, tcolor;
+
+const vec3 lightpos = normalize(vec3(1.0, 0.1, -0.4));
+const bool renormalize = true;
+const float alpha = 8.0;
+void main() {
+
+	// unit vector pointing to viewer
+	vec3 V = vec3(0.0, 0.0, -1.0);
+	// ambient component
+	vec3 C = 0.3 * tcolor;
+
+	vec3 Nhat = tnormal;
+	if (renormalize) Nhat = normalize(Nhat);
+	// unit vector from surface to light source
+	vec3 L = lightpos;
+	// unit reflected vector
+	vec3 R = -reflect(L, Nhat);
+	// diffuse component
+	C += 0.2 * dot(L, Nhat);
+	// specular component
+	C += 0.2 * pow(max(dot(R, V), 0.0), alpha);
+	gl_FragColor = vec4(clamp(C, 0.0, 1.0), 1.0);
+}
+</script>
+<canvas id=canvas></canvas>
+<script>
+"use strict"
+var tau = 2 * Math.PI
+var canvas = document.getElementById("canvas")
+canvas.width = canvas.height = 700
+var gl = UFX.gl(canvas)
+UFX.gltext.init(gl)
+gl.clearColor(0, 0, 0.2, 1)
+gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
+gl.enable(gl.DEPTH_TEST)
+gl.disable(gl.BLEND)
+
+gl.addProgram("moon", "vmoon", "fmoon")
+gl.addProgram("twirl2", "vtwirl2", "ftwirl2")
+
+
+function cylinder(p0, axis1, h0, h1, r, n, smooth) {
+	var points = []
+	var [ux, uy] = V.perps(axis1)
+	var pbase = []
+	for (var jface = 0 ; jface < n ; ++jface) {
+		var phi = jface * tau / n
+		pbase.push(V.lin(Math.cos(phi), ux, Math.sin(phi), uy))
+	}
+	var dp0 = V.times(h0, axis1), dp1 = V.times(h1, axis1), naxis1 = V.times(-1, axis1)
+	for (var jface = 0 ; jface < n ; ++jface) {
+		var kface = (jface + 1) % n
+		var pj0 = V.lin(1, p0, r, pbase[jface])
+		var pk0 = V.lin(1, p0, r, pbase[kface])
+		var nj = pbase[jface], nk = pbase[kface]
+		if (!smooth) {
+			var navg = V.norm(V.plus(nj, nk))
+			nj = nk = navg
+		}
+		var a0 = [V.plus(pj0, dp0), nj]
+		var a1 = [V.plus(pk0, dp0), nk]
+		var a2 = [V.plus(pk0, dp1), nk]
+		var a3 = [V.plus(pj0, dp1), nj]
+		var b0 = [V.plus(pj0, dp1), axis1]
+		var b1 = [V.plus(pk0, dp1), axis1]
+		var b2 = [V.plus(p0, dp1), axis1]
+		var c0 = [V.plus(pj0, dp0), naxis1]
+		var c1 = [V.plus(pk0, dp0), naxis1]
+		var c2 = [V.plus(p0, dp0), naxis1]
+		points.push(a0, a1, a2, a0, a2, a3, b0, b1, b2, c0, c2, c1)
+	}
+	return points
+}
+function Building() {
+	this.n = 0
+	this.data = []
+}
+Building.prototype.add = function (data) {
+	var b = this
+	this.n += data.length
+	data.forEach(function (point) {
+		b.data = b.data.concat(
+			point.pos0,
+			point.axis1, point.dpos1,
+			point.axis2, point.dpos2,
+			point.normal,
+			point.color
+		)
+	})
+}
+var buildings = {}
+buildings.basic = new Building()
+buildings.basic.add(cylinder(V.zero, V.k, -3, 5, 7, 6, false).map(function (point) {
+	var [p, n] = point, color = [0.7, 0.2, 0.2]
+	return {
+		pos0: p, normal: n, color: color,
+		axis1: [0, 0, 0, 0], dpos1: V.zero,
+		axis2: [0, 0, 0, 0], dpos2: V.zero,
+	}
+}))
+buildings.basic.add(cylinder(V.zero, V.k, 5, 16, 2, 20, true).map(function (point) {
+	var [p, n] = point, color = [0.4, 0.5, 0.7]
+	return {
+		pos0: p, normal: n, color: color,
+		axis1: [0, 0, 0, 0], dpos1: V.zero,
+		axis2: [0, 0, 0, 0], dpos2: V.zero,
+	}
+}))
+buildings.basic.add(cylinder(V.zero, V.i, -8, 8, 1, 20, true).map(function (point) {
+	var [p, n] = point, color = [0.2, 0.3, 0.4]
+	return {
+		pos0: [0, 0, 13], normal: n, color: color,
+		axis1: [0, 0, 1, 5], dpos1: p,
+		axis2: [0, 0, 0, 0], dpos2: V.zero,
+	}
+}))
+buildings.basic.add(cylinder(V.zero, V.j, -5, 5, 1.5, 4, false).map(function (point) {
+	var [p, n] = point, color = [0.6, 0.6, 0.2]
+	return {
+		pos0: [0, 0, 13], normal: n, color: color,
+		axis1: [0, 0, 1, 5], dpos1: [5, 0, 0],
+		axis2: [1, 0, 0, 9], dpos2: p,
+	}
+}))
+buildings.basic.add(cylinder(V.zero, V.k, -5, 5, 1.5, 4, false).map(function (point) {
+	var [p, n] = point, color = [0.6, 0.6, 0.2]
+	return {
+		pos0: [0, 0, 13], normal: n, color: color,
+		axis1: [0, 0, 1, 5], dpos1: [-5, 0, 0],
+		axis2: [1, 0, 0, -9], dpos2: p,
+	}
+}))
+function getbuildbuffer() {
+	var data = [], j = 0
+	for (var s in buildings) {
+		buildings[s].offset = j
+		j += buildings[s].n
+		data = data.concat(buildings[s].data)
+	}
+	return gl.makeArrayBuffer(data)
+}
+var buildbuffer = getbuildbuffer()
+var spots = [], ps = [], d = 0, bthetas = []
+while (spots.length < 40) {
+	var q = Q.norm([UFX.random(-1, 1), UFX.random(-1, 1), UFX.random(-1, 1), UFX.random(-1, 1)])
+	var v1 = M3.timesV(Q.rot(q), V.k)
+	if (!spots.some(function (spot) {
+		var v2 = M3.timesV(Q.rot(spot), V.k)
+		return V.dot(v1, v2) > d
+	})) {
+		spots.push(q)
+		d = 0
+		bthetas.push(UFX.random(tau))
+	} else {
+		d += 0.001
+	}
+}
+
+
+var moondata = [], moonelements = []
+var [moonpoints, moonfaces] = isosphere(5)
+moonpoints.forEach(function (point) {
+	var normal = point.slice()
+	normal[0] += 0.1 * UFX.noise(V.plus([12, 13, 14], V.times(6.3, point)))
+	normal[1] += 0.1 * UFX.noise(V.plus([11, 12, 13], V.times(5.4, point)))
+	normal[2] += 0.1 * UFX.noise(V.plus([16, 17, 18], V.times(4.5, point)))
+	normal = V.norm(normal)
+	var dcolor = 0.4 + 0.4 * UFX.noise(V.times(1.5, point))
+	var color = V.times(dcolor, [0.8, 0.9, 1])
+	moondata.push(
+		point[0], point[1], point[2],
+		normal[0], normal[1], normal[2],
+		color[0], color[1], color[2])
+})
+moonfaces.forEach(function (face) {
+	moonelements.push(face[0], face[1], face[2])
+})
+var moondatabuffer = gl.makeArrayBuffer(moondata)
+var moonelementbuffer = gl.makeElementBuffer(moonelements)
+
+var theta = 0
+var qview = Q["1"]
+UFX.ticker.init(function (dt) {
+	theta += 0.2 * dt
+	theta %= tau
+	qview = Q.norm(Q.times(qview, Q.norm([0.1 * dt, -0.1 * dt, 0, 1])))
+	gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
+	gl.enable(gl.DEPTH_TEST)
+	gl.progs.moon.use()
+	gl.progs.moon.set.Rq(Q.rot(qview))
+	moondatabuffer.bind()
+	moonelementbuffer.bind()
+	gl.progs.moon.assignAttribOffsets({ p: 0, normal: 3, color: 6 })
+	gl.drawElements(gl.TRIANGLES, moonelements.length, gl.UNSIGNED_SHORT, 0)
+
+	gl.progs.twirl2.use()
+	buildbuffer.bind()
+	gl.progs.twirl2.assignAttribOffsets({
+		pos0: 0,
+		axis1: 3,
+		dpos1: 7,
+		axis2: 10,
+		dpos2: 14,
+		normal: 17,
+		color: 20,
+	})
+	spots.forEach(function (spot, j) {
+		var Rnormal = M3.times(Q.rot(qview), Q.rot(spot))
+		var Rview = M4.times(M4.scale(0.7), M4.fromM3(Rnormal), M4.glide(0, 0, 1), M4.scale(0.02))
+		gl.progs.twirl2.set({
+			theta: theta + bthetas[j],
+			Rview: Rview,
+			Rnormal: Rnormal,
+		})
+		gl.drawArrays(gl.TRIANGLES, buildings.basic.offset, buildings.basic.n)
+	})
+
+	gl.progs.text.use()
+	gl.progs.text.draw(UFX.ticker.getrates(), [10, 10], { color: "white", ocolor: "black", fontsize: 32 })
+}, null, { minups: 5, maxups: 240 })
+
+
+
+</script>
