@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<title>Twirling control test</title>
+<script src="../../UFX/src/gl.js"></script>
+<script src="../../UFX/src/gltext.js"></script>
+<script src="../../UFX/src/ticker.js"></script>
+<script src="../../UFX/src/resource.js"></script>
+<script src="../../UFX/src/mouse.js"></script>
+<script src="../../UFX/src/key.js"></script>
+<script src="../../UFX/src/noise.js"></script>
+<script src="../../UFX/src/random.js"></script>
+<script src="../../UFX/src/maximize.js"></script>
+<script src="quaternion.js"></script>
+<script src="isosphere.js"></script>
+
+<script type="x-shader/x-vertex" id=vstar>
+attribute vec3 p;
+uniform mat3 Rq;
+uniform vec2 vscale;
+void main() {
+	gl_Position = vec4(3.0 * Rq * p, 1.0);
+	if (gl_Position.z < 0.0) {
+		gl_Position.xy = -gl_Position.xy;
+	}
+	gl_Position.xy *= vscale;
+	gl_Position.z = 0.99;
+	gl_PointSize = 1.0;
+}
+</script>
+<script type="x-shader/x-fragment" id=fstar>
+precision highp float;
+void main() {
+	gl_FragColor = vec4(1.0, 1.0, 1.0, 1.0);
+}
+</script>
+<script type="x-shader/x-vertex" id=vmoon>
+attribute vec3 color;
+attribute vec3 p, normal;
+varying vec3 tcolor, tnormal;
+uniform mat3 Rq;
+uniform float Z;
+uniform float dy;
+uniform vec2 vscale;
+void main() {
+	gl_Position = vec4(Z * (Rq * p - vec3(0.0, dy, 0.0)), 1.0);
+	gl_Position.xy *= vscale;
+	gl_Position.z *= 0.5 / Z;
+	tcolor = color;
+	tnormal = Rq * normal;
+}
+</script>
+<script type="x-shader/x-fragment" id=fmoon>
+precision highp float;
+varying vec3 tcolor, tnormal;
+const vec3 lightpos = normalize(vec3(1.0, 0.1, -0.4));
+void main() {
+	vec3 V = vec3(0.0, 0.0, -1.0);
+	vec3 C = 0.3 * tcolor;
+	vec3 Nhat = normalize(tnormal);
+	vec3 L = lightpos;
+	vec3 R = -reflect(L, Nhat);
+	C += 0.2 * dot(L, Nhat);
+	C += 0.2 * pow(max(dot(R, V), 0.0), 8.0);
+	gl_FragColor = vec4(clamp(C, 0.0, 1.0), 1.0);
+}
+</script>
+<canvas id=canvas></canvas>
+<script>
+"use strict"
+var tau = 2 * Math.PI
+var canvas = document.getElementById("canvas")
+UFX.key.init()
+UFX.key.remap({
+	// auxiliary arrows
+	A: "aleft", W: "aup", S: "adown", D: "aright",
+	// Dvorak auxiliary arrows
+	comma: "aup", O: "adown", E: "aright",
+})
+UFX.key.watchlist = "left up right down aleft aup aright adown shift 1 2".split(" ")
+
+var gl = UFX.gl(canvas)
+UFX.maximize.onadjust = function (canvas, x, y) {
+	gl.viewport(0, 0, x, y)
+}
+UFX.maximize.fill(canvas, "total")
+
+UFX.gltext.init(gl)
+gl.clearColor(0, 0, 0, 1)
+gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
+gl.enable(gl.DEPTH_TEST)
+gl.disable(gl.BLEND)
+
+gl.addProgram("moon", "vmoon", "fmoon")
+gl.addProgram("star", "vstar", "fstar")
+
+var moondata = [], moonelements = []
+var [moonpoints, moonfaces] = isosphere(5)
+moonpoints.forEach(function (point) {
+	var normal = point.slice()
+	normal[0] += 0.2 * UFX.noise(V.plus([12, 13, 14], V.times(6.3, point)))
+	normal[1] += 0.2 * UFX.noise(V.plus([11, 12, 13], V.times(5.4, point)))
+	normal[2] += 0.2 * UFX.noise(V.plus([16, 17, 18], V.times(4.5, point)))
+	normal = V.norm(normal)
+	var dcolor = 0.4 + 0.4 * UFX.noise(V.times(1.5, point))
+	var color = [
+		0.5 + 0.4 * UFX.noise(V.plus([12, 13, 14], V.times(2.3, point))),
+		0.5 + 0.4 * UFX.noise(V.plus([11, 12, 13], V.times(2.4, point))),
+		0.5 + 0.4 * UFX.noise(V.plus([16, 17, 18], V.times(2.5, point))),
+	]
+	moondata.push(
+		point[0], point[1], point[2],
+		normal[0], normal[1], normal[2],
+		color[0], color[1], color[2])
+})
+moonfaces.forEach(function (face) {
+	moonelements.push(face[0], face[1], face[2])
+})
+var moondatabuffer = gl.makeArrayBuffer(moondata)
+var moonelementbuffer = gl.makeElementBuffer(moonelements)
+
+var stardata = []
+while (stardata.length < 10000 * 3) {
+	var p = UFX.random.rsphere()
+	while (UFX.random.flip()) p[2] *= 0.2
+	p = V.norm(p)
+	stardata = stardata.concat(p)
+}
+var starbuffer = gl.makeArrayBuffer(stardata)
+
+
+var qview = Q["1"]
+var eta = tau / 12
+var Z = 0.3
+UFX.ticker.init(function (dt) {
+	var kstate = UFX.key.state()
+	var dx = dt * (!!kstate.pressed.aright - !!kstate.pressed.aleft)
+	var dy = dt * (!!kstate.pressed.aup - !!kstate.pressed.adown)
+	var dZ = dt * (!!kstate.pressed[1] - !!kstate.pressed[2])
+	var bx = dt * (!!kstate.pressed.right - !!kstate.pressed.left)
+	var by = dt * (!!kstate.pressed.up - !!kstate.pressed.down)
+	if (kstate.pressed.shift) {
+		[dx, dy, bx, by] = [bx, by, dx, dy]
+	}
+
+	
+	by = Math.min(Math.max(eta + by, 0), tau/4) - eta
+	eta += by
+
+	var dq = [
+		dy - by,
+		-Math.sin(eta) * bx -Math.cos(eta) * dx,
+		Math.cos(eta) * bx -Math.sin(eta) * dx
+	]
+	dq.push(1 - Math.sqrt(dq[0] * dq[0] + dq[1] * dq[1] + dq[2] * dq[2]))
+	qview = Q.norm(Q.times(qview, Q.norm(dq)))
+	var Rview = Q.rot(qview)
+	Z = Math.min(Math.max(Z + 1 * dZ, -1), 1)
+
+	var S = Math.max(Math.sqrt(canvas.height * canvas.width), canvas.height / 2, canvas.width / 2)
+
+	gl.clear(gl.COLOR_BUFFER_BIT)
+	gl.disable(gl.DEPTH_TEST)
+	gl.progs.star.use()
+	gl.progs.star.set({
+		Rq: Rview,
+		vscale: [S / canvas.width, S / canvas.height],
+	})
+	starbuffer.bind()
+	gl.progs.star.assignAttribOffsets({ p: 0 })
+	gl.drawArrays(gl.POINTS, 0, stardata.length / 3)
+	
+	gl.clear(gl.DEPTH_BUFFER_BIT)
+	gl.enable(gl.DEPTH_TEST)
+	gl.progs.moon.use()
+	gl.progs.moon.set({
+		Rq: Rview,
+		Z: Math.exp(Z),
+		dy: Math.sin(eta),
+		vscale: [S / canvas.width, S / canvas.height],
+	})
+	
+	moondatabuffer.bind()
+	moonelementbuffer.bind()
+	gl.progs.moon.assignAttribOffsets({ p: 0, normal: 3, color: 6 })
+	gl.drawElements(gl.TRIANGLES, moonelements.length, gl.UNSIGNED_SHORT, 0)
+
+	gl.progs.text.use()
+	gl.progs.text.draw(UFX.ticker.getrates(), [10, 10], { color: "white", ocolor: "black", fontsize: 32 })
+}, null, { minups: 5, maxups: 240 })
+
+
+
+</script>
