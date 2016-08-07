@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<title>Editor test</title>
+<script src="../../UFX/src/gl.js"></script>
+<script src="../../UFX/src/ticker.js"></script>
+<script src="../../UFX/src/resource.js"></script>
+<script src="../../UFX/src/mouse.js"></script>
+<script src="../../UFX/src/key.js"></script>
+<script src="../../UFX/src/noise.js"></script>
+<script src="../../UFX/src/random.js"></script>
+<script src="../test/quaternion.js"></script>
+<script src="../test/isosphere.js"></script>
+
+<script type="x-shader/x-vertex" id=vsolid>
+// No lighting
+attribute vec3 p;
+attribute vec4 color;
+varying vec4 tcolor;
+uniform mat4 R;
+void main() {
+	gl_Position = R * vec4(p, 1.0);
+	gl_Position.x *= -1.0;
+	gl_Position.z *= 0.5;
+	tcolor = color;
+}
+</script>
+<script type="x-shader/x-fragment" id=fsolid>
+precision highp float;
+varying vec4 tcolor;
+void main() {
+	gl_FragColor = tcolor;
+}
+</script>
+<script type="x-shader/x-vertex" id=vpart>
+attribute vec3 p0, p1, color, normal;
+attribute vec4 a1;
+varying vec3 tnormal, tcolor;
+uniform mat4 Rview;
+uniform mat3 Rnormal;
+uniform float theta;
+
+mat3 outerProduct(vec3 a, vec3 b) {
+	return mat3(
+		a.x * b.x, a.x * b.y, a.x * b.z,
+		a.y * b.x, a.y * b.y, a.y * b.z,
+		a.z * b.x, a.z * b.y, a.z * b.z
+	);
+}
+mat3 R(vec3 u, float angle) {
+	float S = sin(angle), C = cos(angle), dC = 1.0 - C;
+	return mat3(C) + S * mat3(0.0, u.z, -u.y, -u.z, 0.0, u.x, u.y, -u.x, 0.0) + dC * outerProduct(u, u);
+}
+
+void main() {
+	mat3 R1 = R(a1.xyz, theta * a1.w);
+	vec3 p = p0 + R1 * p1;
+	gl_Position = Rview * vec4(p, 1.0);
+	gl_Position.x *= -1.0;
+	gl_Position.z *= 0.5;
+	tnormal = Rnormal * R1 * normal;
+	tcolor = color;
+}
+</script>
+<script type="x-shader/x-fragment" id=fpart>
+precision highp float;
+varying vec3 tnormal, tcolor;
+
+const vec3 lightpos = normalize(vec3(1.0, 1.0, 1.0));
+const bool renormalize = true;
+const float alpha = 8.0;
+void main() {
+
+	// unit vector pointing to viewer
+	vec3 V = vec3(0.0, 0.0, -1.0);
+	// ambient component
+	float C = 0.3;
+
+	vec3 Nhat = tnormal;
+	if (renormalize) Nhat = normalize(Nhat);
+	// unit vector from surface to light source
+	vec3 L = lightpos;
+	// unit reflected vector
+	vec3 R = -reflect(L, Nhat);
+	// diffuse component
+	C += 0.2 * dot(L, Nhat);
+	// specular component
+	C += 0.2 * pow(max(dot(R, V), 0.0), alpha);
+	gl_FragColor = vec4(clamp(C * tcolor, 0.0, 1.0), 1.0);
+}
+</script>
+<script type="x-shader/x-fragment" id=fmoon>
+precision highp float;
+varying vec3 tcolor, tnormal;
+const vec3 lightpos = normalize(vec3(1.0, 0.1, -0.4));
+void main() {
+	vec3 V = vec3(0.0, 0.0, -1.0);
+	vec3 C = 0.3 * tcolor;
+	vec3 Nhat = normalize(tnormal);
+	vec3 L = lightpos;
+	vec3 R = -reflect(L, Nhat);
+	C += 0.2 * dot(L, Nhat);
+	C += 0.2 * pow(max(dot(R, V), 0.0), 8.0);
+	gl_FragColor = vec4(clamp(C, 0.0, 1.0), 1.0);
+}
+</script>
+<script type="x-shader/x-vertex" id=vtwirl2>
+attribute vec3 pos0;  // position of the axis set point
+attribute vec4 axis1;  // axis1.w is the multiplier
+attribute vec3 dpos1;
+attribute vec4 axis2;  // axis2.w is the multiplier
+attribute vec3 dpos2;
+
+attribute vec3 normal;
+attribute vec3 color;
+uniform float theta;
+
+uniform mat4 Rview;
+uniform mat3 Rnormal;
+
+mat3 outerProduct(vec3 a, vec3 b) {
+	return mat3(
+		a.x * b.x, a.x * b.y, a.x * b.z,
+		a.y * b.x, a.y * b.y, a.y * b.z,
+		a.z * b.x, a.z * b.y, a.z * b.z
+	);
+}
+// (u, angle) = ((0, 0, 0), 0) *should* return the identity matrix.
+mat3 R(vec3 u, float angle) {
+	float S = sin(angle), C = cos(angle), dC = 1.0 - C;
+	return mat3(C) + S * mat3(0.0, u.z, -u.y, -u.z, 0.0, u.x, u.y, -u.x, 0.0) + dC * outerProduct(u, u);
+}
+
+varying vec3 tnormal, tcolor;
+
+void main() {
+	mat3 R1 = R(axis1.xyz, theta * axis1.w);
+	mat3 R2 = R(axis2.xyz, theta * axis2.w);
+	vec3 pos = pos0 + R1 * (dpos1 + R2 * dpos2);
+	gl_Position = Rview * vec4(pos, 1.0);
+	gl_Position.z *= 0.5;
+	tnormal = Rnormal * R1 * R2 * normal;
+	tcolor = color;
+}
+</script>
+<script type="x-shader/x-fragment" id=ftwirl2>
+precision highp float;
+varying vec3 tnormal, tcolor;
+
+const vec3 lightpos = normalize(vec3(1.0, 0.1, -0.4));
+const bool renormalize = true;
+const float alpha = 8.0;
+void main() {
+
+	// unit vector pointing to viewer
+	vec3 V = vec3(0.0, 0.0, -1.0);
+	// ambient component
+	vec3 C = 0.3 * tcolor;
+
+	vec3 Nhat = tnormal;
+	if (renormalize) Nhat = normalize(Nhat);
+	// unit vector from surface to light source
+	vec3 L = lightpos;
+	// unit reflected vector
+	vec3 R = -reflect(L, Nhat);
+	// diffuse component
+	C += 0.2 * dot(L, Nhat);
+	// specular component
+	C += 0.2 * pow(max(dot(R, V), 0.0), alpha);
+	gl_FragColor = vec4(clamp(C, 0.0, 1.0), 1.0);
+}
+</script>
+<canvas id=canvas></canvas>
+<div id=inputs></div>
+<script>
+"use strict"
+var tau = 2 * Math.PI
+var canvas = document.getElementById("canvas")
+var inputs = document.getElementById("inputs")
+canvas.width = canvas.height = 700
+UFX.mouse.init(canvas)
+UFX.mouse.capture.middle = true
+UFX.mouse.capture.right = true
+UFX.mouse.capture.wheel = true
+var gl = UFX.gl(canvas)
+gl.clearColor(0, 0, 0.2, 1)
+gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
+gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, 0, 1)
+
+gl.addProgram("solid", "vsolid", "fsolid")
+gl.addProgram("part", "vpart", "fpart")
+var floor = {}
+floor.data = []
+floor.nv = 0
+for (var x = -6 ; x <= 6 ; ++x) {
+	for (var y = -6 ; y <= 6 ; ++y) {
+		var c = (x + y) % 2 ? 0.4 : 0.1, color = [c, c, c, 0.4]
+		var p0 = [x, y, 0], p1 = [x + 1, y, 0], p2 = [x + 1, y + 1, 0], p3 = [x, y + 1, 0]
+		floor.data = floor.data.concat(p0, color, p1, color, p2, color, p0, color, p2, color, p3, color)
+		floor.nv += 6
+	}
+}
+floor.buffer = gl.makeArrayBuffer(floor.data)
+var axislines = {
+	nv: 6,
+	data: [
+		0,0,0, 1,0,0,1, 1,0,0, 1,0,0,1,  // x-axis
+		0,0,0, 0,1,0,1, 0,1,0, 0,1,0,1,  // y-axis
+		0,0,0, 0,0,1,1, 0,0,1, 0,0,1,1,  // z-axis
+	]
+}
+axislines.buffer = gl.makeArrayBuffer(axislines.data)
+
+function Parameter(owner, name, value) {
+	this.owner = owner
+	this.name = name
+	this.value = value || 0
+	this.text = this.name + " = "
+
+	this.input = document.createElement("input")
+	this.input.value = this.value
+	this.input.onchange = this.update.bind(this)
+	this.label = document.createElement("label")
+	this.label.appendChild(document.createTextNode(this.text))
+	this.label.appendChild(this.input)
+	this.element = document.createElement("p")
+	this.element.appendChild(this.label)
+	
+}
+Parameter.prototype = {
+	set: function (value) {
+		this.input.value = value
+		this.update()
+	},
+	addinput: function () {
+		inputs.appendChild(this.element)
+	},
+	update: function () {
+		this.value = +this.input.value
+		this.owner.update()
+	},
+}
+
+
+function Sphere() {
+	this.parameters = [
+		new Parameter(this, "p0x", 0),
+		new Parameter(this, "p0y", 0),
+		new Parameter(this, "p0z", 0),
+		new Parameter(this, "a1x", 0),
+		new Parameter(this, "a1y", 0),
+		new Parameter(this, "a1z", 1),
+		new Parameter(this, "p1x", 0),
+		new Parameter(this, "p1y", 0),
+		new Parameter(this, "p1z", 0),
+		new Parameter(this, "r", 1),
+		new Parameter(this, "n1", 10),
+	]
+}
+Sphere.prototype = {
+	getspec: function () {
+		var spec = {}
+		this.parameters.forEach(function (p) {
+			spec[p.name] = p.value
+		})
+		return spec
+	},
+	build: function () {
+		var spec = this.getspec()
+		var [points, faces] = isosphere(2)
+		var pdata = []
+		faces.forEach(function (face) {
+			face.forEach(function (jpoint) {
+				var [x, y, z] = points[jpoint]
+				pdata.push({
+					p0: [spec.p0x, spec.p0y, spec.p0z],
+					a1: [spec.a1x, spec.a1y, spec.a1z],
+					n1: spec.n1,
+					p1: [
+						spec.p1x + spec.r * x,
+						spec.p1y + spec.r * y,
+						spec.p1z + spec.r * z,
+					],
+					normal: [x, y, z],
+					color: [1, 0.5, 0],
+				})
+			})
+		})
+		this.nvert = pdata.length
+		this.data = [].concat.apply([], pdata.map(function (b) {
+			return [
+				b.p0[0], b.p0[1], b.p0[2],
+				b.a1[0], b.a1[1], b.a1[2], b.n1,
+				b.p1[0], b.p1[1], b.p1[2],
+				b.normal[0], b.normal[1], b.normal[2],
+				b.color[0], b.color[1], b.color[2],
+			]
+		}))
+		if (this.buffer) gl.deleteBuffer(this.buffer)
+		this.buffer = gl.makeArrayBuffer(this.data)
+	},
+	setup: function () {
+		this.parameters.forEach(function (p) {
+			p.addinput()
+		})
+	},
+	update: function () {
+		this.build()
+	},
+}
+
+var parts = [
+	new Sphere(),
+]
+
+parts[0].setup()
+parts[0].build()
+
+var theta = 0
+var qpresets = {
+	corner: Q.norm([-0.8, 0.3, 0.2, -0.45]),
+	x: [-0.5, 0.5, 0.5, -0.5],
+	y: Q.norm([-1, 0, 0, -1]),
+	z: Q.j,
+}
+
+var qview = qpresets.corner, Z = 0
+UFX.ticker.init(function (dt) {
+	var mstate = UFX.mouse.state()
+	var kstate = UFX.key.state()
+	
+	if (mstate && mstate.pos) {
+		if (mstate.right.isdown && mstate.dpos) {
+			var dx = mstate.dpos[0] / 400, dy = mstate.dpos[1] / 400
+			qview = Q.norm(Q.times(qview, Q.norm([dy, -dx, 0, 1])))
+		}
+	}
+
+	theta += 0.2 * dt
+	theta %= tau
+	
+	var R = M4.times(M4.scale(0.1 * Math.exp(Z)), Q.rot4(qview))
+	gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
+	gl.enable(gl.DEPTH_TEST)
+	gl.enable(gl.BLEND)
+	gl.progs.solid.use()
+	axislines.buffer.bind()
+	gl.progs.solid.assignAttribOffsets({ p: 0, color: 3 })
+	gl.progs.solid.set.R(M4.times(M4.scale(10), R))
+	gl.drawArrays(gl.LINES, 0, axislines.nv)
+
+	gl.progs.part.use()
+	gl.progs.part.set({
+		Rview: R,
+		Rnormal: Q.rot(qview),
+		theta: theta,
+	})
+	parts[0].buffer.bind()
+	gl.progs.part.assignAttribOffsets({ p0: 0, a1: 3, p1: 7, normal: 10, color: 13, })
+	gl.drawArrays(gl.TRIANGLES, 0, parts[0].nvert)
+	for (var i in gl.progs.part.attribs) {
+		gl.disableVertexAttribArray(gl.progs.part.attribs[i])
+	}
+
+	gl.progs.solid.use()
+	floor.buffer.bind()
+	gl.progs.solid.assignAttribOffsets({ p: 0, color: 3 })
+	gl.progs.solid.set.R(R)
+	gl.drawArrays(gl.TRIANGLES, 0, floor.nv)
+}, null, { minups: 5, maxups: 240 })
+
+
+
+</script>
