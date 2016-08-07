@@ -39,6 +39,11 @@ var Q = {
 	rot4: function (q) {
 		return M4.fromM3(Q.rot(q))
 	},
+	// if q is a unit quaternion close to unity, then this returns *roughly* q^n (to leading order)
+	pow: function (q, n) {
+		var [x, y, z, w] = q
+		return Q.norm([x * n, y * n, z * n, w])
+	},
 }
 
 

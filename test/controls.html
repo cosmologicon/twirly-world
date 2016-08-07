@@ -76,6 +76,10 @@ UFX.key.remap({
 	comma: "aup", O: "adown", E: "aright",
 })
 UFX.key.watchlist = "left up right down aleft aup aright adown shift 1 2".split(" ")
+UFX.mouse.init(canvas)
+UFX.mouse.capture.right = true
+UFX.mouse.capture.middle = true
+UFX.mouse.capture.wheel = true
 
 var gl = UFX.gl(canvas)
 UFX.maximize.onadjust = function (canvas, x, y) {
@@ -128,40 +132,82 @@ var starbuffer = gl.makeArrayBuffer(stardata)
 
 
 var qview = Q["1"]
+var qspace = Q["1"]
 var eta = tau / 12
 var Z = 0.3
+var spacealpha = 1
+var sensitivity = {
+	xkey: 1,
+	ykey: 1,
+	rkey: 1,
+	akey: 1,
+	zkey: 1,
+	xmouse: 1,
+	ymouse: 1,
+	rmouse: 1,
+	amouse: 1,
+	zmouse: 0.01,
+}
 UFX.ticker.init(function (dt) {
+	var S = Math.max(Math.sqrt(canvas.height * canvas.width), canvas.height / 2, canvas.width / 2)
+	var kdx = 0, kdy = 0, kdZ = 0, kdr = 0, kda = 0
+	var mdx = 0, mdy = 0, mdZ = 0, mdr = 0, mda = 0
+
 	var kstate = UFX.key.state()
-	var dx = dt * (!!kstate.pressed.aright - !!kstate.pressed.aleft)
-	var dy = dt * (!!kstate.pressed.aup - !!kstate.pressed.adown)
-	var dZ = dt * (!!kstate.pressed[1] - !!kstate.pressed[2])
-	var bx = dt * (!!kstate.pressed.right - !!kstate.pressed.left)
-	var by = dt * (!!kstate.pressed.up - !!kstate.pressed.down)
-	if (kstate.pressed.shift) {
-		[dx, dy, bx, by] = [bx, by, dx, dy]
+	var mstate = UFX.mouse.state()
+	
+	var kswap = kstate.pressed.shift
+	var mswap = kstate.pressed.shift
+
+	if (kstate) {
+		var dx0 = !!kstate.pressed.aright - !!kstate.pressed.aleft
+		var dy0 = !!kstate.pressed.aup - !!kstate.pressed.adown
+		var dx1 = !!kstate.pressed.right - !!kstate.pressed.left
+		var dy1 = !!kstate.pressed.up - !!kstate.pressed.down
+		if (kswap) [dx0, dy0, dx1, dy1] = [dx1, dy1, dx0, dy0]
+		kdx = sensitivity.xkey * dt * dx0
+		kdy = sensitivity.ykey * dt * dy0
+		kdr = sensitivity.rkey * dt * dx1
+		kda = sensitivity.akey * dt * dy1
+		kdZ = sensitivity.zkey * dt * (!!kstate.pressed[1] - !!kstate.pressed[2])
+	}
+	if (mstate) {
+		var dmx = mstate.dpos[0] / S, dmy = -mstate.dpos[1] / S
+		var Ldown = mstate.left.isdown, Rdown = mstate.right.isdown
+		if (mswap) [Ldown, Rdown] = [Rdown, Ldown]
+		if (Ldown) {
+			mdx = sensitivity.xmouse * -dmx
+			mdy = sensitivity.ymouse * -dmy
+		} else if (Rdown) {
+			mdr = sensitivity.rmouse * -dmx
+			mda = sensitivity.amouse * dmy
+		}
+		mdZ = sensitivity.zmouse * mstate.wheeldy
 	}
 
+	var dx = kdx + mdx, dy = kdy + mdy, dZ = kdZ + mdZ
+	var dr = kdr + mdr, da = kda + mda
 	
-	by = Math.min(Math.max(eta + by, 0), tau/4) - eta
-	eta += by
+	da = Math.min(Math.max(eta + da, 0), tau/4) - eta
+	eta += da
 
-	var dq = [
-		dy - by,
-		-Math.sin(eta) * bx -Math.cos(eta) * dx,
-		Math.cos(eta) * bx -Math.sin(eta) * dx
-	]
-	dq.push(1 - Math.sqrt(dq[0] * dq[0] + dq[1] * dq[1] + dq[2] * dq[2]))
-	qview = Q.norm(Q.times(qview, Q.norm(dq)))
+	var dq = Q.norm([
+		dy - da,
+		-Math.sin(eta) * dr -Math.cos(eta) * dx,
+		Math.cos(eta) * dr -Math.sin(eta) * dx,
+		1,
+	])
+	var spacedq = Q.pow(dq, spacealpha)
+	qview = Q.norm(Q.times(qview, dq))
+	qspace = Q.norm(Q.times(qspace, spacedq))
 	var Rview = Q.rot(qview)
 	Z = Math.min(Math.max(Z + 1 * dZ, -1), 1)
-
-	var S = Math.max(Math.sqrt(canvas.height * canvas.width), canvas.height / 2, canvas.width / 2)
 
 	gl.clear(gl.COLOR_BUFFER_BIT)
 	gl.disable(gl.DEPTH_TEST)
 	gl.progs.star.use()
 	gl.progs.star.set({
-		Rq: Rview,
+		Rq: Q.rot(qspace),
 		vscale: [S / canvas.width, S / canvas.height],
 	})
 	starbuffer.bind()
@@ -170,6 +216,8 @@ UFX.ticker.init(function (dt) {
 	
 	gl.clear(gl.DEPTH_BUFFER_BIT)
 	gl.enable(gl.DEPTH_TEST)
+	gl.enable(gl.CULL_FACE)
+	gl.cullFace(gl.BACK)
 	gl.progs.moon.use()
 	gl.progs.moon.set({
 		Rq: Rview,
@@ -177,11 +225,11 @@ UFX.ticker.init(function (dt) {
 		dy: Math.sin(eta),
 		vscale: [S / canvas.width, S / canvas.height],
 	})
-	
 	moondatabuffer.bind()
 	moonelementbuffer.bind()
 	gl.progs.moon.assignAttribOffsets({ p: 0, normal: 3, color: 6 })
 	gl.drawElements(gl.TRIANGLES, moonelements.length, gl.UNSIGNED_SHORT, 0)
+	gl.disable(gl.CULL_FACE)
 
 	gl.progs.text.use()
 	gl.progs.text.draw(UFX.ticker.getrates(), [10, 10], { color: "white", ocolor: "black", fontsize: 32 })
