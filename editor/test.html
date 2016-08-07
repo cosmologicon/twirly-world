@@ -31,6 +31,13 @@ void main() {
 	gl_FragColor = tcolor;
 }
 </script>
+<script type="x-shader/x-fragment" id=funiform>
+precision highp float;
+uniform vec4 ucolor;
+void main() {
+	gl_FragColor = ucolor;
+}
+</script>
 <script type="x-shader/x-vertex" id=vpart>
 attribute vec3 p0, p1, color, normal;
 attribute vec4 a1;
@@ -38,6 +45,7 @@ varying vec3 tnormal, tcolor;
 uniform mat4 Rview;
 uniform mat3 Rnormal;
 uniform float theta;
+uniform float dz;
 
 mat3 outerProduct(vec3 a, vec3 b) {
 	return mat3(
@@ -56,6 +64,7 @@ void main() {
 	vec3 p = p0 + R1 * p1;
 	gl_Position = Rview * vec4(p, 1.0);
 	gl_Position.x *= -1.0;
+	gl_Position.z += dz;
 	gl_Position.z *= 0.5;
 	tnormal = Rnormal * R1 * normal;
 	tcolor = color;
@@ -188,6 +197,10 @@ body {
 #inputs p {
 	margin: 0;
 }
+#canvas {
+	float: left;
+	margin-right: 1em;
+}
 </style>
 <canvas id=canvas></canvas>
 <p><select name="partselect" onchange="selectpart(this.selectedIndex-1)">
@@ -196,17 +209,26 @@ body {
 <option value=1>Edit part #2</option>
 <option value=2>Edit part #3</option>
 </select>
+<br>
 <button onclick="qview = qpresets.corner">Cam reset</button>
 <button onclick="qview = qpresets.x">Cam x-axis</button>
 <button onclick="qview = qpresets.y">Cam y-axis</button>
 <button onclick="qview = qpresets.z">Cam z-axis</button>
+<br>
+<button onclick="fruntarget = 1 - fruntarget">Power up/down</button>
+<button onclick="theta = 0">Reset theta</button>
 <div id=inputs></div>
+<p>Controls:
+<br>Right drag: rotate camera
+<br>Scroll wheel: zoom
+<br>Tab: select part
 <script>
 "use strict"
 var tau = 2 * Math.PI
 var canvas = document.getElementById("canvas")
 var inputs = document.getElementById("inputs")
 canvas.width = canvas.height = 700
+UFX.key.init()
 UFX.mouse.init(canvas)
 UFX.mouse.capture.middle = true
 UFX.mouse.capture.right = true
@@ -218,6 +240,7 @@ gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, 0, 1)
 
 gl.addProgram("solid", "vsolid", "fsolid")
 gl.addProgram("part", "vpart", "fpart")
+gl.addProgram("outline", "vpart", "funiform")
 var floor = {}
 floor.data = []
 floor.nv = 0
@@ -332,11 +355,11 @@ Sphere.prototype = {
 	build: function () {
 		var spec = this.getspec()
 		var [points, faces] = isosphere(3)
-		var pdata = []
+		var pdata = [], ldata = []
 		faces.forEach(function (face) {
-			face.forEach(function (jpoint) {
+			var ps = face.map(function (jpoint) {
 				var [x, y, z] = points[jpoint]
-				pdata.push({
+				return {
 					p0: [spec.p0.x, spec.p0.y, spec.p0.z],
 					a1: [spec.a1.x, spec.a1.y, spec.a1.z],
 					n1: spec.n1,
@@ -347,10 +370,13 @@ Sphere.prototype = {
 					],
 					normal: [x, y, z],
 					color: [spec.color.r, spec.color.g, spec.color.b],
-				})
+				}
 			})
+			pdata.push(ps[0], ps[1], ps[2])
+			ldata.push(ps[0], ps[1], ps[1], ps[2], ps[2], ps[0])
 		})
 		this.nvert = pdata.length
+		this.nlvert = ldata.length
 		this.data = [].concat.apply([], pdata.map(function (b) {
 			return [
 				b.p0[0], b.p0[1], b.p0[2],
@@ -360,8 +386,19 @@ Sphere.prototype = {
 				b.color[0], b.color[1], b.color[2],
 			]
 		}))
-		if (this.buffer) gl.deleteBuffer(this.buffer)
+		this.ldata = [].concat.apply([], ldata.map(function (b) {
+			return [
+				b.p0[0], b.p0[1], b.p0[2],
+				b.a1[0], b.a1[1], b.a1[2], b.n1,
+				b.p1[0], b.p1[1], b.p1[2],
+			]
+		}))
+		if (this.buffer) {
+			gl.deleteBuffer(this.buffer)
+			gl.deleteBuffer(this.lbuffer)
+		}
 		this.buffer = gl.makeArrayBuffer(this.data)
+		this.lbuffer = gl.makeArrayBuffer(this.ldata)
 	},
 	select: function () {
 		this.parameters.forEach(function (p) {
@@ -395,6 +432,9 @@ function selectpart(jpart) {
 		parts[jpart].select()
 	}
 }
+function cycleselect() {
+	selectpart(parts.indexOf(selectedpart) + 1)
+}
 
 var theta = 0
 var qpresets = {
@@ -405,35 +445,63 @@ var qpresets = {
 }
 
 var qview = qpresets.corner, Z = 0
+var frunning = 1, fruntarget = 1
 UFX.ticker.init(function (dt) {
 	var mstate = UFX.mouse.state()
 	var kstate = UFX.key.state()
 	
+	UFX.key.active = false
 	if (mstate && mstate.pos) {
 		if (mstate.right.isdown && mstate.dpos) {
 			var dx = mstate.dpos[0] / 400, dy = mstate.dpos[1] / 400
 			qview = Q.norm(Q.times(qview, Q.norm([dy, -dx, 0, 1])))
 		}
+		Z = Math.min(Math.max(Z + 0.01 * mstate.wheeldy, -1.5), 1.5)
+		if (0 <= mstate.pos[0] && mstate.pos[0] < canvas.width &&
+			0 <= mstate.pos[1] && mstate.pos[1] < canvas.height) {
+			UFX.key.active = true
+		}
+	}
+	if (kstate.down.tab) {
+		cycleselect()
 	}
 
-	theta += 0.2 * dt
+	frunning += Math.min(Math.max(fruntarget - frunning, -0.5 * dt), 0.5 * dt)
+	var krun = frunning * frunning * (3 - 2 * frunning)
+	theta += 0.2 * krun * dt
 	theta %= tau
 	
 	var R = M4.times(M4.scale(0.1 * Math.exp(Z)), Q.rot4(qview))
 	gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
 	gl.enable(gl.DEPTH_TEST)
 	gl.enable(gl.BLEND)
+	gl.lineWidth(1)
 	gl.progs.solid.use()
 	axislines.buffer.bind()
 	gl.progs.solid.assignAttribOffsets({ p: 0, color: 3 })
 	gl.progs.solid.set.R(M4.times(M4.scale(10), R))
 	gl.drawArrays(gl.LINES, 0, axislines.nv)
 
+	if (selectedpart) {
+		gl.lineWidth(2)
+		gl.progs.outline.use()
+		gl.progs.outline.set({
+			Rview: R,
+			theta: theta,
+			dz: 0.02,
+			ucolor: [1, 1, 1, 1],
+		})
+		selectedpart.lbuffer.bind()
+		gl.progs.outline.assignAttribOffsets({ p0: 0, a1: 3, p1: 7, })
+		gl.drawArrays(gl.LINES, 0, selectedpart.nlvert)
+	}
+
 	gl.progs.part.use()
 	gl.progs.part.set({
 		Rview: R,
 		Rnormal: Q.rot(qview),
 		theta: theta,
+		dz: 0,
 	})
 	parts.forEach(function (part) {
 		part.buffer.bind()
