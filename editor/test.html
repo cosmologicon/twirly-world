@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <title>Editor test</title>
+<link href='https://fonts.googleapis.com/css?family=Mouse+Memoirs' rel='stylesheet' type='text/css'>
 <script src="../../UFX/src/gl.js"></script>
 <script src="../../UFX/src/ticker.js"></script>
 <script src="../../UFX/src/resource.js"></script>
@@ -168,7 +169,37 @@ void main() {
 	gl_FragColor = vec4(clamp(C, 0.0, 1.0), 1.0);
 }
 </script>
+<style>
+body {
+	background: #006;
+	color: white;
+	font-family: "Mouse Memoirs", sans-serif;
+	font-size: 28px;
+}
+#inputs input {
+	color: yellow;
+	background: transparent;
+	font-family: inherit;
+	font-size: inherit;
+	border: thin gray solid;
+	padding: 0 0.1em;
+	width: 2em;
+}
+#inputs p {
+	margin: 0;
+}
+</style>
 <canvas id=canvas></canvas>
+<p><select name="partselect" onchange="selectpart(this.selectedIndex-1)">
+<option value=-1>--</option>
+<option value=0>Edit part #1</option>
+<option value=1>Edit part #2</option>
+<option value=2>Edit part #3</option>
+</select>
+<button onclick="qview = qpresets.corner">Cam reset</button>
+<button onclick="qview = qpresets.x">Cam x-axis</button>
+<button onclick="qview = qpresets.y">Cam y-axis</button>
+<button onclick="qview = qpresets.z">Cam z-axis</button>
 <div id=inputs></div>
 <script>
 "use strict"
@@ -223,15 +254,13 @@ function Parameter(owner, name, value) {
 	this.label.appendChild(this.input)
 	this.element = document.createElement("p")
 	this.element.appendChild(this.label)
-	
 }
 Parameter.prototype = {
-	set: function (value) {
-		this.input.value = value
-		this.update()
-	},
-	addinput: function () {
+	attach: function () {
 		inputs.appendChild(this.element)
+	},
+	remove: function () {
+		inputs.removeChild(this.element)
 	},
 	update: function () {
 		this.value = +this.input.value
@@ -239,20 +268,57 @@ Parameter.prototype = {
 	},
 }
 
+function VectorParameter(owner, name, value, components) {
+	this.owner = owner
+	this.name = name
+	this.components = components || ["x", "y", "z"]
+	this.length = this.components.length
+	value = value || []
+	while (value.length < this.length) value.push(0)
+	this.value = {}
 
-function Sphere() {
+	this.element = document.createElement("p")
+	this.element.appendChild(document.createTextNode(this.name + " = { "))
+	this.inputs = {}
+	for (var j = 0 ; j < this.length ; ++j) {
+		this.value[this.components[j]] = value[j]
+		var input = this.inputs[this.components[j]] = document.createElement("input")
+		input.value = value[j]
+		input.onchange = this.update.bind(this)
+		var label = document.createElement("label")
+		label.appendChild(document.createTextNode(this.components[j] + ": "))
+		label.appendChild(input)
+		this.element.appendChild(label)
+		if (j < this.length - 1) {
+			this.element.appendChild(document.createTextNode(", "))
+		}
+	}
+	this.element.appendChild(document.createTextNode(" }"))
+}
+VectorParameter.prototype = {
+	attach: function () {
+		inputs.appendChild(this.element)
+	},
+	remove: function () {
+		inputs.removeChild(this.element)
+	},
+	update: function () {
+		this.value = {}
+		for (var c in this.inputs) {
+			this.value[c] = +this.inputs[c].value
+		}
+		this.owner.update()
+	},
+}
+
+function Sphere(p1) {
 	this.parameters = [
-		new Parameter(this, "p0x", 0),
-		new Parameter(this, "p0y", 0),
-		new Parameter(this, "p0z", 0),
-		new Parameter(this, "a1x", 0),
-		new Parameter(this, "a1y", 0),
-		new Parameter(this, "a1z", 1),
-		new Parameter(this, "p1x", 0),
-		new Parameter(this, "p1y", 0),
-		new Parameter(this, "p1z", 0),
-		new Parameter(this, "r", 1),
+		new VectorParameter(this, "p0", [0, 0, 0]),
+		new VectorParameter(this, "a1", [0, 0, 1]),
+		new VectorParameter(this, "p1", p1),
 		new Parameter(this, "n1", 10),
+		new Parameter(this, "r", 1),
+		new VectorParameter(this, "color", [1, 0.5, 0], ["r", "g", "b"]),
 	]
 }
 Sphere.prototype = {
@@ -265,22 +331,22 @@ Sphere.prototype = {
 	},
 	build: function () {
 		var spec = this.getspec()
-		var [points, faces] = isosphere(2)
+		var [points, faces] = isosphere(3)
 		var pdata = []
 		faces.forEach(function (face) {
 			face.forEach(function (jpoint) {
 				var [x, y, z] = points[jpoint]
 				pdata.push({
-					p0: [spec.p0x, spec.p0y, spec.p0z],
-					a1: [spec.a1x, spec.a1y, spec.a1z],
+					p0: [spec.p0.x, spec.p0.y, spec.p0.z],
+					a1: [spec.a1.x, spec.a1.y, spec.a1.z],
 					n1: spec.n1,
 					p1: [
-						spec.p1x + spec.r * x,
-						spec.p1y + spec.r * y,
-						spec.p1z + spec.r * z,
+						spec.p1.x + spec.r * x,
+						spec.p1.y + spec.r * y,
+						spec.p1.z + spec.r * z,
 					],
 					normal: [x, y, z],
-					color: [1, 0.5, 0],
+					color: [spec.color.r, spec.color.g, spec.color.b],
 				})
 			})
 		})
@@ -297,9 +363,14 @@ Sphere.prototype = {
 		if (this.buffer) gl.deleteBuffer(this.buffer)
 		this.buffer = gl.makeArrayBuffer(this.data)
 	},
-	setup: function () {
+	select: function () {
 		this.parameters.forEach(function (p) {
-			p.addinput()
+			p.attach()
+		})
+	},
+	deselect: function () {
+		this.parameters.forEach(function (p) {
+			p.remove()
 		})
 	},
 	update: function () {
@@ -308,11 +379,22 @@ Sphere.prototype = {
 }
 
 var parts = [
-	new Sphere(),
+	new Sphere([0, 0, 0]),
+	new Sphere([4, 0, 0]),
+	new Sphere([0, 4, 0]),
 ]
-
-parts[0].setup()
-parts[0].build()
+parts.forEach(function (part) {
+	part.build()
+})
+var selectedpart = null
+function selectpart(jpart) {
+	if (selectedpart) selectedpart.deselect()
+	selectedpart = null
+	if (parts[jpart]) {
+		selectedpart = parts[jpart]
+		parts[jpart].select()
+	}
+}
 
 var theta = 0
 var qpresets = {
@@ -353,9 +435,11 @@ UFX.ticker.init(function (dt) {
 		Rnormal: Q.rot(qview),
 		theta: theta,
 	})
-	parts[0].buffer.bind()
-	gl.progs.part.assignAttribOffsets({ p0: 0, a1: 3, p1: 7, normal: 10, color: 13, })
-	gl.drawArrays(gl.TRIANGLES, 0, parts[0].nvert)
+	parts.forEach(function (part) {
+		part.buffer.bind()
+		gl.progs.part.assignAttribOffsets({ p0: 0, a1: 3, p1: 7, normal: 10, color: 13, })
+		gl.drawArrays(gl.TRIANGLES, 0, part.nvert)
+	})
 	for (var i in gl.progs.part.attribs) {
 		gl.disableVertexAttribArray(gl.progs.part.attribs[i])
 	}
