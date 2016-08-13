@@ -8,6 +8,7 @@
 <script src="../../UFX/src/key.js"></script>
 <script src="../../UFX/src/noise.js"></script>
 <script src="../../UFX/src/random.js"></script>
+<script src="../../UFX/src/Thing.js"></script>
 <script src="../test/quaternion.js"></script>
 <script src="../test/isosphere.js"></script>
 
@@ -39,8 +40,9 @@ void main() {
 }
 </script>
 <script type="x-shader/x-vertex" id=vpart>
-attribute vec3 p0, p1, color, normal;
-attribute vec4 a1;
+attribute vec3 p0, p1, p2, color, normal;
+attribute vec4 a1, a2;
+attribute float m, n3, mu;
 varying vec3 tnormal, tcolor;
 uniform mat4 Rview;
 uniform mat3 Rnormal;
@@ -61,12 +63,14 @@ mat3 R(vec3 u, float angle) {
 
 void main() {
 	mat3 R1 = R(a1.xyz, theta * a1.w);
-	vec3 p = p0 + R1 * p1;
+	mat3 R2 = R(a2.xyz, theta * a2.w);
+	float s = m * sin(n3 * theta + mu);
+	vec3 p = p0 + R1 * (p1 + R2 * p2 + s * a2.xyz);
 	gl_Position = Rview * vec4(p, 1.0);
 	gl_Position.x *= -1.0;
 	gl_Position.z += dz;
 	gl_Position.z *= 0.5;
-	tnormal = Rnormal * R1 * normal;
+	tnormal = Rnormal * R1 * R2 * normal;
 	tcolor = color;
 }
 </script>
@@ -97,87 +101,6 @@ void main() {
 	gl_FragColor = vec4(clamp(C * tcolor, 0.0, 1.0), 1.0);
 }
 </script>
-<script type="x-shader/x-fragment" id=fmoon>
-precision highp float;
-varying vec3 tcolor, tnormal;
-const vec3 lightpos = normalize(vec3(1.0, 0.1, -0.4));
-void main() {
-	vec3 V = vec3(0.0, 0.0, -1.0);
-	vec3 C = 0.3 * tcolor;
-	vec3 Nhat = normalize(tnormal);
-	vec3 L = lightpos;
-	vec3 R = -reflect(L, Nhat);
-	C += 0.2 * dot(L, Nhat);
-	C += 0.2 * pow(max(dot(R, V), 0.0), 8.0);
-	gl_FragColor = vec4(clamp(C, 0.0, 1.0), 1.0);
-}
-</script>
-<script type="x-shader/x-vertex" id=vtwirl2>
-attribute vec3 pos0;  // position of the axis set point
-attribute vec4 axis1;  // axis1.w is the multiplier
-attribute vec3 dpos1;
-attribute vec4 axis2;  // axis2.w is the multiplier
-attribute vec3 dpos2;
-
-attribute vec3 normal;
-attribute vec3 color;
-uniform float theta;
-
-uniform mat4 Rview;
-uniform mat3 Rnormal;
-
-mat3 outerProduct(vec3 a, vec3 b) {
-	return mat3(
-		a.x * b.x, a.x * b.y, a.x * b.z,
-		a.y * b.x, a.y * b.y, a.y * b.z,
-		a.z * b.x, a.z * b.y, a.z * b.z
-	);
-}
-// (u, angle) = ((0, 0, 0), 0) *should* return the identity matrix.
-mat3 R(vec3 u, float angle) {
-	float S = sin(angle), C = cos(angle), dC = 1.0 - C;
-	return mat3(C) + S * mat3(0.0, u.z, -u.y, -u.z, 0.0, u.x, u.y, -u.x, 0.0) + dC * outerProduct(u, u);
-}
-
-varying vec3 tnormal, tcolor;
-
-void main() {
-	mat3 R1 = R(axis1.xyz, theta * axis1.w);
-	mat3 R2 = R(axis2.xyz, theta * axis2.w);
-	vec3 pos = pos0 + R1 * (dpos1 + R2 * dpos2);
-	gl_Position = Rview * vec4(pos, 1.0);
-	gl_Position.z *= 0.5;
-	tnormal = Rnormal * R1 * R2 * normal;
-	tcolor = color;
-}
-</script>
-<script type="x-shader/x-fragment" id=ftwirl2>
-precision highp float;
-varying vec3 tnormal, tcolor;
-
-const vec3 lightpos = normalize(vec3(1.0, 0.1, -0.4));
-const bool renormalize = true;
-const float alpha = 8.0;
-void main() {
-
-	// unit vector pointing to viewer
-	vec3 V = vec3(0.0, 0.0, -1.0);
-	// ambient component
-	vec3 C = 0.3 * tcolor;
-
-	vec3 Nhat = tnormal;
-	if (renormalize) Nhat = normalize(Nhat);
-	// unit vector from surface to light source
-	vec3 L = lightpos;
-	// unit reflected vector
-	vec3 R = -reflect(L, Nhat);
-	// diffuse component
-	C += 0.2 * dot(L, Nhat);
-	// specular component
-	C += 0.2 * pow(max(dot(R, V), 0.0), alpha);
-	gl_FragColor = vec4(clamp(C, 0.0, 1.0), 1.0);
-}
-</script>
 <style>
 body {
 	background: #006;
@@ -185,9 +108,9 @@ body {
 	font-family: "Mouse Memoirs", sans-serif;
 	font-size: 28px;
 }
-#inputs input {
+#inputs input, #inputs select, #inputs option {
 	color: yellow;
-	background: transparent;
+	background: black;
 	font-family: inherit;
 	font-size: inherit;
 	border: thin gray solid;
@@ -203,12 +126,6 @@ body {
 }
 </style>
 <canvas id=canvas></canvas>
-<p><select name="partselect" onchange="selectpart(this.selectedIndex-1)">
-<option value=-1>--</option>
-<option value=0>Edit part #1</option>
-<option value=1>Edit part #2</option>
-<option value=2>Edit part #3</option>
-</select>
 <br>
 <button onclick="qview = qpresets.corner">Cam reset</button>
 <button onclick="qview = qpresets.x">Cam x-axis</button>
@@ -263,85 +180,236 @@ var axislines = {
 }
 axislines.buffer = gl.makeArrayBuffer(axislines.data)
 
-function Parameter(owner, name, value) {
-	this.owner = owner
-	this.name = name
-	this.value = value || 0
-	this.text = this.name + " = "
 
-	this.input = document.createElement("input")
-	this.input.value = this.value
-	this.input.onchange = this.update.bind(this)
-	this.label = document.createElement("label")
-	this.label.appendChild(document.createTextNode(this.text))
-	this.label.appendChild(this.input)
-	this.element = document.createElement("p")
-	this.element.appendChild(this.label)
-}
-Parameter.prototype = {
-	attach: function () {
-		inputs.appendChild(this.element)
+// parameter.update() -> read current value from inputs
+// parameter.set(value) -> setinput and update owner
+var HasOwner = {
+	update: function () {
+		if (this.owner) this.owner.update()
 	},
-	remove: function () {
-		inputs.removeChild(this.element)
+	set: function () {
+		this.update()
+	},
+}
+var Attachable = {
+	attach: function (box) {
+		box.appendChild(this.element)
+	},
+	detach: function (box) {
+		box.removeChild(this.element)
+	},
+	build: function () {
+		this.element = document.createElement("p")
+		this.fillelement(this.element)
+	},
+}
+var HasSingleValue = {
+	fillelement: function (element) {
+		this.input = document.createElement("input")
+		this.input.onchange = this.update.bind(this)
+		this.label = document.createElement("label")
+		this.label.appendChild(document.createTextNode(this.name + " = "))
+		this.label.appendChild(this.input)
+		element.appendChild(this.label)
 	},
 	update: function () {
 		this.value = +this.input.value
-		this.owner.update()
+	},
+	set: function (value) {
+		this.input.value = value
+	},
+}
+var HasBooleanValue = {
+	fillelement: function (element) {
+		this.input = document.createElement("input")
+		this.input.type = "checkbox"
+		this.input.onchange = this.update.bind(this)
+		this.label = document.createElement("label")
+		this.label.appendChild(document.createTextNode(this.name + " "))
+		this.label.appendChild(this.input)
+		element.appendChild(this.label)
+	},
+	update: function () {
+		this.value = this.input.checked
+	},
+	set: function (value) {
+		this.input.checked = !!value
+	},
+}
+var HasValueOptions = {
+	fillelement: function (element) {
+		var select = this.input = document.createElement("select")
+		this.input.onchange = this.update.bind(this)
+		this.options.forEach(function (option, j) {
+			var opt = document.createElement("option")
+			opt.value = option
+			opt.innerHTML = option
+			select.appendChild(opt)
+		})
+		this.label = document.createElement("label")
+		this.label.appendChild(document.createTextNode(this.name + " = "))
+		this.label.appendChild(this.input)
+		element.appendChild(this.label)
+	},
+	update: function () {
+		this.value = +this.input.value
+	},
+	set: function (value) {
+		this.input.value = value
 	},
 }
 
-function VectorParameter(owner, name, value, components) {
-	this.owner = owner
-	this.name = name
-	this.components = components || ["x", "y", "z"]
-	this.length = this.components.length
-	value = value || []
-	while (value.length < this.length) value.push(0)
-	this.value = {}
-
-	this.element = document.createElement("p")
-	this.element.appendChild(document.createTextNode(this.name + " = { "))
-	this.inputs = {}
-	for (var j = 0 ; j < this.length ; ++j) {
-		this.value[this.components[j]] = value[j]
-		var input = this.inputs[this.components[j]] = document.createElement("input")
-		input.value = value[j]
-		input.onchange = this.update.bind(this)
-		var label = document.createElement("label")
-		label.appendChild(document.createTextNode(this.components[j] + ": "))
-		label.appendChild(input)
-		this.element.appendChild(label)
-		if (j < this.length - 1) {
-			this.element.appendChild(document.createTextNode(", "))
+var HasVectorValue = {
+	fillelement: function (element) {
+		element.appendChild(document.createTextNode(this.name + " = {"))
+		this.inputs = {}
+		for (var j = 0 ; j < this.components.length ; ++j) {
+			var input = this.inputs[this.components[j]] = document.createElement("input")
+			input.onchange = this.update.bind(this)
+			var label = document.createElement("label")
+			label.appendChild(document.createTextNode(this.components[j] + ": "))
+			label.appendChild(input)
+			this.element.appendChild(label)
+			if (j < this.length - 1) {
+				element.appendChild(document.createTextNode(" "))
+			}
 		}
-	}
-	this.element.appendChild(document.createTextNode(" }"))
-}
-VectorParameter.prototype = {
-	attach: function () {
-		inputs.appendChild(this.element)
-	},
-	remove: function () {
-		inputs.removeChild(this.element)
+		element.appendChild(document.createTextNode(" }"))
 	},
 	update: function () {
 		this.value = {}
-		for (var c in this.inputs) {
-			this.value[c] = +this.inputs[c].value
+		for (var cname in this.inputs) {
+			this.value[cname] = +this.inputs[cname].value
 		}
-		this.owner.update()
+	},
+	set: function (value) {
+		var inputs = this.inputs
+		this.components.forEach(function (c, j) {
+			inputs[c].value = value[Array.isArray(value) ? j : c]
+		})
+	},
+	asvector: function () {
+		return this.components.map(c => this.value[c])
+	},
+}
+var HasNormalizeButton = {
+	setnorm: function () {
+		this.set(V.norm(this.asvector()))
+	},
+	fillelement: function (element) {
+		var nbutton = document.createElement("button")
+		nbutton.innerHTML = "norm"
+		nbutton.onclick = this.setnorm.bind(this)
+		element.appendChild(nbutton)
 	},
 }
 
-function Sphere(p1) {
+
+
+function Parameter(owner, name, value) {
+	this.name = name
+	this.build()
+	this.set(value || 0)
+	this.owner = owner
+}
+Parameter.prototype = UFX.Thing()
+	.addcomp(HasSingleValue)
+	.addcomp(Attachable)
+	.addcomp(HasOwner)
+
+function BooleanParameter(owner, name, value) {
+	this.name = name
+	this.build()
+	this.set(value)
+	this.owner = owner
+}
+BooleanParameter.prototype = UFX.Thing()
+	.addcomp(HasBooleanValue)
+	.addcomp(Attachable)
+	.addcomp(HasOwner)
+
+function OptionParameter(owner, name, value, options) {
+	this.name = name
+	this.options = options
+	this.build()
+	this.set(value)
+	this.owner = owner
+}
+OptionParameter.prototype = UFX.Thing()
+	.addcomp(HasValueOptions)
+	.addcomp(Attachable)
+	.addcomp(HasOwner)
+
+function VectorParameter(owner, name, value, components) {
+	this.name = name
+	this.components = components || ["x", "y", "z"]
+	this.build()
+	this.set(value || [0, 0, 0])
+	this.owner = owner
+}
+VectorParameter.prototype = UFX.Thing()
+	.addcomp(HasVectorValue)
+	.addcomp(Attachable)
+	.addcomp(HasOwner)
+
+function UnitVectorParameter(owner, name, value, components) {
+	this.name = name
+	this.components = components || ["x", "y", "z"]
+	this.build()
+	this.set(value || [0, 0, 1])
+	this.owner = owner
+}
+UnitVectorParameter.prototype = UFX.Thing()
+	.addcomp(HasVectorValue)
+	.addcomp(HasNormalizeButton)
+	.addcomp(Attachable)
+	.addcomp(HasOwner)
+
+
+
+function getpdata(pdata) {
+	return [].concat.apply([], pdata.map(function (b) {
+		return [
+			b.p0[0], b.p0[1], b.p0[2],
+			b.a1[0], b.a1[1], b.a1[2], b.n1,
+			b.p1[0], b.p1[1], b.p1[2],
+			b.a2[0], b.a2[1], b.a2[2], b.n2,
+			b.p2[0], b.p2[1], b.p2[2],
+			b.m, b.n3, b.mu,
+			b.normal[0], b.normal[1], b.normal[2],
+			b.color[0], b.color[1], b.color[2],
+		]
+	}))
+}
+function getldata(ldata) {
+	return [].concat.apply([], ldata.map(function (b) {
+		return [
+			b.p0[0], b.p0[1], b.p0[2],
+			b.a1[0], b.a1[1], b.a1[2], b.n1,
+			b.p1[0], b.p1[1], b.p1[2],
+			b.a2[0], b.a2[1], b.a2[2], b.n2,
+			b.p2[0], b.p2[1], b.p2[2],
+			b.m, b.n3, b.mu,
+		]
+	}))
+}
+
+function Sphere(p) {
 	this.parameters = [
 		new VectorParameter(this, "p0", [0, 0, 0]),
-		new VectorParameter(this, "a1", [0, 0, 1]),
-		new VectorParameter(this, "p1", p1),
-		new Parameter(this, "n1", 10),
+		new UnitVectorParameter(this, "a1", [0, 0, 1]),
+		new VectorParameter(this, "p1", [0, 0, 0]),
+		new Parameter(this, "n1", 0),
+		new UnitVectorParameter(this, "a2", [0, 0, 1]),
+		new VectorParameter(this, "p2", p),
+		new Parameter(this, "n2", 10),
+		new Parameter(this, "m", 0),
+		new Parameter(this, "n3", 0),
+		new Parameter(this, "mu", 0),
 		new Parameter(this, "r", 1),
 		new VectorParameter(this, "color", [1, 0.5, 0], ["r", "g", "b"]),
+		new OptionParameter(this, "Nface", 3, [0, 1, 2, 3, 4]),
+		new BooleanParameter(this, "smooth", true),
 	]
 }
 Sphere.prototype = {
@@ -354,21 +422,33 @@ Sphere.prototype = {
 	},
 	build: function () {
 		var spec = this.getspec()
-		var [points, faces] = isosphere(3)
+		var [points, faces] = isosphere(spec.Nface)
 		var pdata = [], ldata = []
 		faces.forEach(function (face) {
+			if (!spec.smooth) {
+				var verts = face.map(jpoint => points[jpoint])
+				var normal0 = V.norm(V.plus(verts[0], V.plus(verts[1], verts[2])))
+			} else {
+				normal0 = null
+			}
 			var ps = face.map(function (jpoint) {
 				var [x, y, z] = points[jpoint]
 				return {
 					p0: [spec.p0.x, spec.p0.y, spec.p0.z],
 					a1: [spec.a1.x, spec.a1.y, spec.a1.z],
 					n1: spec.n1,
-					p1: [
-						spec.p1.x + spec.r * x,
-						spec.p1.y + spec.r * y,
-						spec.p1.z + spec.r * z,
+					p1: [spec.p1.x, spec.p1.y, spec.p1.z],
+					a2: [spec.a2.x, spec.a2.y, spec.a2.z],
+					n2: spec.n2,
+					p2: [
+						spec.p2.x + spec.r * x,
+						spec.p2.y + spec.r * y,
+						spec.p2.z + spec.r * z,
 					],
-					normal: [x, y, z],
+					n3: spec.n3,
+					m: spec.m,
+					mu: spec.mu,
+					normal: normal0 || [x, y, z],
 					color: [spec.color.r, spec.color.g, spec.color.b],
 				}
 			})
@@ -377,22 +457,8 @@ Sphere.prototype = {
 		})
 		this.nvert = pdata.length
 		this.nlvert = ldata.length
-		this.data = [].concat.apply([], pdata.map(function (b) {
-			return [
-				b.p0[0], b.p0[1], b.p0[2],
-				b.a1[0], b.a1[1], b.a1[2], b.n1,
-				b.p1[0], b.p1[1], b.p1[2],
-				b.normal[0], b.normal[1], b.normal[2],
-				b.color[0], b.color[1], b.color[2],
-			]
-		}))
-		this.ldata = [].concat.apply([], ldata.map(function (b) {
-			return [
-				b.p0[0], b.p0[1], b.p0[2],
-				b.a1[0], b.a1[1], b.a1[2], b.n1,
-				b.p1[0], b.p1[1], b.p1[2],
-			]
-		}))
+		this.data = getpdata(pdata)
+		this.ldata = getldata(ldata)
 		if (this.buffer) {
 			gl.deleteBuffer(this.buffer)
 			gl.deleteBuffer(this.lbuffer)
@@ -402,12 +468,12 @@ Sphere.prototype = {
 	},
 	select: function () {
 		this.parameters.forEach(function (p) {
-			p.attach()
+			p.attach(inputs)
 		})
 	},
 	deselect: function () {
 		this.parameters.forEach(function (p) {
-			p.remove()
+			p.detach(inputs)
 		})
 	},
 	update: function () {
@@ -492,7 +558,9 @@ UFX.ticker.init(function (dt) {
 			ucolor: [1, 1, 1, 1],
 		})
 		selectedpart.lbuffer.bind()
-		gl.progs.outline.assignAttribOffsets({ p0: 0, a1: 3, p1: 7, })
+		gl.progs.outline.assignAttribOffsets({
+			p0: 0, a1: 3, p1: 7, a2: 10, p2: 14, m: 17, n3: 18, mu: 19,
+		})
 		gl.drawArrays(gl.LINES, 0, selectedpart.nlvert)
 	}
 
@@ -505,7 +573,10 @@ UFX.ticker.init(function (dt) {
 	})
 	parts.forEach(function (part) {
 		part.buffer.bind()
-		gl.progs.part.assignAttribOffsets({ p0: 0, a1: 3, p1: 7, normal: 10, color: 13, })
+		gl.progs.part.assignAttribOffsets({
+			p0: 0, a1: 3, p1: 7, a2: 10, p2: 14, m: 17, n3: 18, mu: 19,
+			normal: 20, color: 23,
+		})
 		gl.drawArrays(gl.TRIANGLES, 0, part.nvert)
 	})
 	for (var i in gl.progs.part.attribs) {
