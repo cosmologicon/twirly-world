@@ -108,7 +108,7 @@ body {
 	font-family: "Mouse Memoirs", sans-serif;
 	font-size: 28px;
 }
-#inputs input, #inputs select, #inputs option {
+input, #inputs select, #inputs option {
 	color: yellow;
 	background: black;
 	font-family: inherit;
@@ -127,6 +127,15 @@ body {
 </style>
 <canvas id=canvas></canvas>
 <br>
+<label>save name: <input type="text" id="savename" value="tower" style="width:6em"></input></label>
+<button onclick="save()" id="savebutton">save</button>
+<button onclick="load()" id="loadbutton">load</button>
+<br>
+<button onclick="addsphere()">Add sphere</button>
+<button onclick="addcylinder()">Add p-shape</button>
+<button onclick="duplicateselected()">Duplicate selected</button>
+<button onclick="removeselected()">Remove selected</button>
+<br>
 <button onclick="qview = qpresets.corner">Cam reset</button>
 <button onclick="qview = qpresets.x">Cam x-axis</button>
 <button onclick="qview = qpresets.y">Cam y-axis</button>
@@ -136,16 +145,15 @@ body {
 <button onclick="theta = 0">Reset theta</button>
 <div id=inputs></div>
 <p>Controls:
-<br>Right drag: rotate camera
+<br>Left drag: rotate camera
 <br>Scroll wheel: zoom
-<br>Tab: select part
+<br>Right click: cycle through parts
 <script>
 "use strict"
 var tau = 2 * Math.PI
 var canvas = document.getElementById("canvas")
 var inputs = document.getElementById("inputs")
 canvas.width = canvas.height = 700
-UFX.key.init()
 UFX.mouse.init(canvas)
 UFX.mouse.capture.middle = true
 UFX.mouse.capture.right = true
@@ -454,7 +462,7 @@ function getldata(ldata) {
 
 var PartBasics = {
 	getspec: function () {
-		var spec = {}
+		var spec = { type: this.type }
 		this.parameters.forEach(function (p) {
 			spec[p.name] = p.value
 		})
@@ -464,6 +472,12 @@ var PartBasics = {
 		this.parameters.forEach(function (p) {
 			if (p.name in spec) p.set(spec[p.name])
 		})
+	},
+	unbuild: function () {
+		if (this.buffer) {
+			gl.deleteBuffer(this.buffer)
+			gl.deleteBuffer(this.lbuffer)
+		}
 	},
 	build: function () {
 		var spec = this.getspec()
@@ -476,10 +490,7 @@ var PartBasics = {
 		this.nlvert = ldata.length
 		this.data = getpdata(pdata)
 		this.ldata = getldata(ldata)
-		if (this.buffer) {
-			gl.deleteBuffer(this.buffer)
-			gl.deleteBuffer(this.lbuffer)
-		}
+		this.unbuild()
 		this.buffer = gl.makeArrayBuffer(this.data)
 		this.lbuffer = gl.makeArrayBuffer(this.ldata)
 	},
@@ -495,10 +506,12 @@ var PartBasics = {
 	},
 	update: function () {
 		this.build()
+		tosave = true
 	},
 }
 
 function Sphere(spec) {
+	this.type = "Sphere"
 	this.parameters = [
 		new VectorParameter(this, "p0", [0, 0, 0]),
 		new UnitVectorParameter(this, "a1", [0, 0, 1]),
@@ -555,6 +568,7 @@ Sphere.prototype = UFX.Thing()
 	})
 
 function ProfilePart(spec) {
+	this.type = "Profile"
 	this.parameters = [
 		new VectorParameter(this, "p0", [0, 0, 0]),
 		new UnitVectorParameter(this, "a1", [0, 0, 1]),
@@ -578,6 +592,7 @@ ProfilePart.prototype = UFX.Thing()
 	.addcomp(PartBasics)
 	.addcomp({
 		getpdata: function (spec) {
+			if (!spec.profile) return [[], []]
 			var verts = spec.profile.verts, palette = spec.profile.palette
 			var fnormals = []
 			for (var j = 0 ; j < verts.length - 1 ; ++j) {
@@ -669,13 +684,43 @@ function newCylinder() {
 	})
 }
 
-
-var parts = [
-	new Sphere(),
-]
-parts.forEach(function (part) {
+var tosave = false
+var parts = []
+function addsphere() {
+	var part = new Sphere()
 	part.build()
-})
+	parts.push(part)
+	tosave = true
+}
+function addcylinder() {
+	var part = newCylinder()
+	part.build()
+	parts.push(part)
+	tosave = true
+}
+function partfromspec(pspec) {
+	var type = {
+		"Sphere": Sphere,
+		"Profile": ProfilePart,
+	}[pspec.type]
+	var part = new type(pspec)
+	part.build()
+	return part
+}
+
+function duplicateselected() {
+	if (selectedpart === null) return
+	parts.push(partfromspec(selectedpart.getspec()))
+	tosave = true
+}
+function removeselected() {
+	if (selectedpart === null) return
+	parts.splice(parts.indexOf(selectedpart), 1)
+	tosave = true
+	selectpart(null)
+}
+
+
 var selectedpart = null
 function selectpart(jpart) {
 	if (selectedpart) selectedpart.deselect()
@@ -687,6 +732,26 @@ function selectpart(jpart) {
 }
 function cycleselect() {
 	selectpart(parts.indexOf(selectedpart) + 1)
+}
+
+function getstate() {
+	return parts.map(part => part.getspec())
+}
+function setstate(state) {
+	parts.forEach(function (part) { part.unbuild() })
+	parts = state.map(partfromspec)
+	selectpart(null)
+}
+function save() {
+	var savename = document.getElementById("savename").value
+	localStorage["tweditorsave" + savename] = JSON.stringify(getstate())
+	tosave = false
+}
+function load() {
+	var savename = document.getElementById("savename").value
+	var state = localStorage["tweditorsave" + savename]
+	if (!state) return
+	setstate(JSON.parse(state))
 }
 
 var theta = 0
@@ -701,21 +766,21 @@ var qview = qpresets.corner, Z = 0
 var frunning = 1, fruntarget = 1
 UFX.ticker.init(function (dt) {
 	var mstate = UFX.mouse.state()
-	var kstate = UFX.key.state()
+//	var kstate = UFX.key.state()
 	
-	UFX.key.active = false
+//	UFX.key.active = false
 	if (mstate && mstate.pos) {
-		if (mstate.right.isdown && mstate.dpos) {
+		if (mstate.left.isdown && mstate.dpos) {
 			var dx = mstate.dpos[0] / 400, dy = mstate.dpos[1] / 400
 			qview = Q.norm(Q.times(qview, Q.norm([dy, -dx, 0, 1])))
 		}
 		Z = Math.min(Math.max(Z + 0.01 * mstate.wheeldy, -1.5), 1.5)
 		if (0 <= mstate.pos[0] && mstate.pos[0] < canvas.width &&
 			0 <= mstate.pos[1] && mstate.pos[1] < canvas.height) {
-			UFX.key.active = true
+//			UFX.key.active = true
 		}
 	}
-	if (kstate.down.tab) {
+	if (mstate.right.down) {
 		cycleselect()
 	}
 
@@ -775,6 +840,7 @@ UFX.ticker.init(function (dt) {
 	gl.progs.solid.assignAttribOffsets({ p: 0, color: 3 })
 	gl.progs.solid.set.R(R)
 	gl.drawArrays(gl.TRIANGLES, 0, floor.nv)
+	document.getElementById("savebutton").disabled = !tosave
 }, null, { minups: 5, maxups: 240 })
 
 
