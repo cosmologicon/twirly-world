@@ -115,6 +115,14 @@ var M3 = {
 			M[2] * v[0] + M[5] * v[1] + M[8] * v[2],
 		]
 	},
+	rot: function (u, theta) {
+		var [x, y, z] = u, S = Math.sin(theta), C = Math.cos(theta), dC = 1 - C
+		return [
+			C + x * x * dC, y * x * dC + z * S, z * x * dC - y * S,
+			x * y * dC - z * S, C + y * y * dC, y * z * dC + x * S,
+			x * z * dC + y * S, y * z * dC - x * S, C + z * z * dC,
+		]
+	},
 }
 
 var M4 = {

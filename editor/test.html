@@ -403,6 +403,26 @@ ProfileParameter.prototype = UFX.Thing()
 
 
 
+function zclone(data, N) {
+	var rdata = []
+	for (var j = 0 ; j < N ; ++j) {
+		var M = M3.rot(V.k, j * tau / N)
+		rdata = rdata.concat(data.map(function (b) {
+			return {
+				p0: M3.timesV(M, b.p0),
+				a1: M3.timesV(M, b.a1),
+				p1: M3.timesV(M, b.p1),
+				a2: M3.timesV(M, b.a2),
+				p2: M3.timesV(M, b.p2),
+				n1: b.n1, n2: b.n2, n3: b.n3,
+				m: b.m, mu: b.mu,
+				color: b.color,
+				normal: M3.timesV(M, b.normal),
+			}
+		}))
+	}
+	return rdata
+}
 function getpdata(pdata) {
 	return [].concat.apply([], pdata.map(function (b) {
 		return [
@@ -446,7 +466,12 @@ var PartBasics = {
 		})
 	},
 	build: function () {
-		var [pdata, ldata] = this.getpdata(this.getspec())
+		var spec = this.getspec()
+		var [pdata, ldata] = this.getpdata(spec)
+		if (spec.Nzclone > 1) {
+			pdata = zclone(pdata, spec.Nzclone)
+			ldata = zclone(ldata, spec.Nzclone)
+		}
 		this.nvert = pdata.length
 		this.nlvert = ldata.length
 		this.data = getpdata(pdata)
@@ -489,6 +514,7 @@ function Sphere(spec) {
 		new VectorParameter(this, "color", [1, 0.5, 0], ["r", "g", "b"]),
 		new OptionParameter(this, "Nface", 3, [0, 1, 2, 3, 4]),
 		new BooleanParameter(this, "smooth", true),
+		new OptionParameter(this, "Nzclone", 1, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]),
 	]
 	if (spec) this.setspec(spec)
 }
@@ -544,6 +570,7 @@ function ProfilePart(spec) {
 		new Parameter(this, "Nsection", 8),
 		new BooleanParameter(this, "longsmooth", true),
 		new ProfileParameter(this, "profile"),
+		new OptionParameter(this, "Nzclone", 1, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]),
 	]
 	if (spec) this.setspec(spec)
 }
@@ -644,7 +671,7 @@ function newCylinder() {
 
 
 var parts = [
-	newCylinder(),
+	new Sphere(),
 ]
 parts.forEach(function (part) {
 	part.build()
