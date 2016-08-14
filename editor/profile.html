@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<title>Part profile editor</title>
+<link href='https://fonts.googleapis.com/css?family=Mouse+Memoirs' rel='stylesheet' type='text/css'>
+<script src="../../UFX/src/draw.js"></script>
+<script src="../../UFX/src/ticker.js"></script>
+<script src="../../UFX/src/resource.js"></script>
+<script src="../../UFX/src/mouse.js"></script>
+<script src="../../UFX/src/key.js"></script>
+<script src="../../UFX/src/Thing.js"></script>
+<style>
+body {
+	background: #006;
+	color: white;
+	font-family: "Mouse Memoirs", sans-serif;
+	font-size: 28px;
+}
+#inputs input, #inputs select, #inputs option, #palette input {
+	color: yellow;
+	background: black;
+	font-family: inherit;
+	font-size: inherit;
+	border: thin gray solid;
+	padding: 0 0.1em;
+	width: 2em;
+}
+#inputs p {
+	margin: 0;
+}
+#canvas {
+	float: left;
+	margin-right: 1em;
+}
+#palette th {
+	font-weight: normal;
+}
+#savebutton {
+	font-size: 160%;
+}
+</style>
+<canvas id=canvas style="float: left"></canvas>
+<p><button id=savebutton onclick="save()">save profile</button>
+<div id="palette">
+<p>
+<button onclick="addcolor()">add color</button>
+<button id="rcbutton" onclick="removecolor()">remove color</button>
+<table id="plist">
+</table>
+</div>
+<p><label>opacity<input id="opacity" type="range" min=0 max=100 value=100></input></label>
+<p>Controls:
+<br>Right drag: pan
+<br>Mouse wheel: zoom
+<br>Tab: cycle selected vertex
+<br>0 (zero): reset view
+<br>Left drag or arrows or WASD: move selected vertex
+<br>Hold shift: precision movement
+<br>space: add vertex above selected
+<br>X: remove selected
+<br>Z: toggle selected vertex smoothness
+<br>1: cycle selected vertex color below
+<br>2: cycle selected vertex color above
+<script>
+"use strict"
+var tau = 2 * Math.PI
+var canvas = document.getElementById("canvas")
+canvas.width = canvas.height = 700
+var context = canvas.getContext("2d")
+UFX.key.init()
+UFX.key.watchlist = "tab space x z 0 1 2 up down left right shift".split(" ")
+UFX.key.remaparrows(true)
+UFX.mouse.init(canvas)
+UFX.mouse.capture.middle = true
+UFX.mouse.capture.right = true
+UFX.mouse.capture.wheel = true
+UFX.draw.setcontext(context)
+
+var verts = [], palette = []
+var jselected = null
+var profile0 = {
+	verts: [
+		{ x: 1, y: -1, smooth: true, jcolor0: 0, jcolor1: 0, },
+		{ x: 1, y: 1, smooth: false, jcolor0: 0, jcolor1: 0, },
+	],
+	palette: [
+		[0.6, 0.6, 0.6],
+	],
+}
+
+function buildpalette() {
+	var plist = document.getElementById("plist")
+	plist.innerHTML = ""
+	function pupdate(j, k, i) {
+		return function () {
+			palette[j][k] = +i.value
+			tosave = true
+		}
+	}
+	palette.forEach(function (color, jcolor) {
+		var tr = document.createElement("tr")
+		var th = document.createElement("th")
+		th.innerHTML = "color #" + jcolor
+		tr.appendChild(th)
+		color.forEach(function (channel, kchannel) {
+			var td = document.createElement("td")
+			var input = document.createElement("input")
+			input.value = palette[jcolor][kchannel]
+			input.onchange = pupdate(jcolor, kchannel, input)
+			td.appendChild(input)
+			tr.appendChild(td)
+		})
+		plist.appendChild(tr)
+	})
+	document.getElementById("rcbutton").disabled = palette.length <= 1
+}
+function addcolor() {
+	palette.push([0.6, 0.6, 0.6])
+	tosave = true
+	buildpalette()
+}
+function removecolor() {
+	palette.pop()
+	verts.forEach(function (vert) {
+		while (vert.jcolor0 >= palette.length) --vert.jcolor0
+		while (vert.jcolor1 >= palette.length) --vert.jcolor1
+	})
+	tosave = true
+	buildpalette()
+}
+
+function getprofile() {
+	return {
+		palette: palette,
+		verts: verts,
+	}
+}
+function setprofile(profile) {
+	palette = profile.palette
+	verts = profile.verts
+	buildpalette()
+}
+function save() {
+	localStorage.twedprofile = JSON.stringify(getprofile())
+	tosave = false
+}
+function load() {
+	var profile = JSON.parse(localStorage.twedprofile || JSON.stringify(profile0))
+	setprofile(profile)
+}
+if (window.location.search.includes("reset")) {
+	localStorage.twedprofile = JSON.stringify(profile0)
+}
+load()
+
+
+var x0 = 0, y0 = 0, Z = -2, tosave = false
+UFX.ticker.init(function (dt) {
+	var mstate = UFX.mouse.state()
+	var kstate = UFX.key.state()
+	UFX.key.active = mstate.within
+	var svert = verts[jselected]
+	if (mstate.within) {
+		if (kstate.down.tab) {
+			jselected = jselected === null ? 0 : jselected == verts.length - 1 ? null : jselected + 1
+		}
+		if (kstate.down[0]) {
+			x0 = 0
+			y0 = 0
+			Z = -2
+		}
+		if (svert) {
+			if (kstate.down.z) {
+				svert.smooth = !svert.smooth
+				tosave = true
+			}
+			if (kstate.down.x) {
+				verts.splice(jselected, 1)
+				if (jselected >= verts.length) jselected = null
+				tosave = true
+			}
+			if (kstate.down[1]) {
+				svert.jcolor0++
+				svert.jcolor0 %= palette.length
+				tosave = true
+			}
+			if (kstate.down[2]) {
+				svert.jcolor1++
+				svert.jcolor1 %= palette.length
+				tosave = true
+			}
+		}
+		if (kstate.down.space) {
+			if (jselected === null) jselected = verts.length - 1
+			if (jselected == verts.length - 1) {
+				var v0 = verts[jselected]
+				var vert = { x: v0.x, y: v0.y + 1, jcolor0: v0.jcolor1, jcolor1: v0.jcolor1, smooth: v0.smooth }
+			} else {
+				var v0 = verts[jselected], v1 = verts[jselected + 1]
+				vert = { x: (v0.x + v1.x) / 2, y: (v0.y + v1.y) / 2,
+					jcolor0: v0.jcolor1, jcolor1: v1.jcolor0, smooth: v0.smooth }
+			}
+			verts.splice(jselected + 1, 0, vert)
+			++jselected
+			tosave = true
+		}
+	}
+
+	Z += 0.02 * mstate.wheeldy
+	var sx = canvas.width, sy = canvas.height
+	var z = Math.exp(Z), S = z * (sy / 2)
+	if (mstate.right.isdown) {
+		var factor = kstate.pressed.shift ? 0.1 : 1
+		x0 -= mstate.dpos[0] / S * factor
+		y0 += mstate.dpos[1] / S * factor
+	}
+	if (mstate.within && svert) {
+		var factor = kstate.pressed.shift ? 0.03 : 0.3
+		var dx = !!kstate.pressed.right - !!kstate.pressed.left
+		var dy = !!kstate.pressed.up - !!kstate.pressed.down
+		svert.x += factor * dt / z * dx
+		svert.y += factor * dt / z * dy
+		if (dx || dy) tosave = true
+	}
+	if (svert && mstate.left.isdown) {
+		svert.x += mstate.dpos[0] / S
+		svert.y -= mstate.dpos[1] / S
+		if (mstate.dpos[0] || mstate.dpos[1]) tosave = true
+	}
+	if (svert) svert.x = Math.max(svert.x, 0)
+	function toscreen(x, y) {
+		return [(x - x0) * S + sx / 2, -(y - y0) * S + sy / 2]
+	}
+	function toworld(px, py) {
+		return [x0 + (px - sx / 2) / S, y0 - (py - sy / 2) / S]
+	}
+
+
+	UFX.draw("fs #003 f0")
+	function drawxtics(xtic0, dx, thick) {
+		UFX.draw("[ ss #00f alpha", thick, "lw 1")
+		for (var x = xtic0 ; ; x += dx) {
+			var px = toscreen(x, 0)[0]
+			if ((px < 0 && dx < 0) || (px > sx && dx > 0)) break
+			UFX.draw("b m", px, 0, "l", px, sy, "s")
+			if (!dx) break
+		}
+		UFX.draw("]")
+	}
+	function drawytics(ytic0, dy, thick) {
+		UFX.draw("[ ss #00f alpha", thick, "lw 1")
+		for (var y = ytic0 ; ; y += dy) {
+			var py = toscreen(0, y)[1]
+			if ((py > sy && dy < 0) || (py < 0 && dy > 0)) break
+			UFX.draw("b m", 0, py, "l", sx, py, "s")
+			if (!dy) break
+		}
+		UFX.draw("]")
+	}
+	var M = 10000
+	while (M > 1 / z) M /= 10
+	var m = M / 10
+	var xtic0 = Math.round(x0 / M) * M
+	var ytic0 = Math.round(y0 / M) * M
+	drawxtics(xtic0, m, 0.1)
+	drawxtics(xtic0 - m, -m, 0.1)
+	drawxtics(xtic0, M, 0.3)
+	drawxtics(xtic0 - M, -M, 0.3)
+	drawxtics(0, 0, 1)
+	drawytics(ytic0, m, 0.1)
+	drawytics(ytic0 - m, -m, 0.1)
+	drawytics(ytic0, M, 0.3)
+	drawytics(ytic0 - M, -M, 0.3)
+	drawytics(0, 0, 1)
+
+
+	for (var j = 0 ; j < verts.length - 1 ; ++j) {
+		var v0 = verts[j], v1 = verts[j + 1]
+		var p0 = toscreen(v0.x, v0.y), p1 = toscreen(v1.x, v1.y)
+		var q0 = toscreen(-v0.x, v0.y), q1 = toscreen(-v1.x, v1.y)
+		var opacity = document.getElementById("opacity").value * 0.01
+		var grad = UFX.draw.lingrad(
+			0, p0[1], 0, p1[1],
+			0, "rgba(" + palette[v0.jcolor1].map(k => 255 * k).join(",") + "," + opacity + ")",
+			1, "rgba(" + palette[v1.jcolor0].map(k => 255 * k).join(",") + "," + opacity + ")")
+		UFX.draw("[ fs", grad, "( m", p0, "l", p1, "l", q1, "l", q0, ") f ]")
+	}
+	UFX.draw("[ lw 3")
+	verts.forEach(function (vert, jvert) {
+		UFX.draw("[ t", toscreen(vert.x, vert.y))
+		UFX.draw("ss", (jvert === jselected ? "#fff" : "#888"), "b")
+		UFX.draw(vert.smooth ? "o 0 0 6 s" : ["r", tau/8, "sr -5 -5 10 10"])
+		UFX.draw("]")
+	})
+	UFX.draw("]")
+
+
+	var texts = []
+	if (mstate.pos) {
+		var mspos = toworld(mstate.pos[0], mstate.pos[1])
+		texts.push("mouse:~[~" + mspos[0].toFixed(3) + "~" + mspos[1].toFixed(3) + "~]")
+	}
+	if (verts[jselected]) {
+		var vert = verts[jselected]
+		texts.push("vertex:~[~" + vert.x.toFixed(3) + "~" + vert.y.toFixed(3) + "~]")
+		texts.push("color~above:~" + vert.jcolor1)
+		texts.push("color~below:~" + vert.jcolor0)
+	}
+
+	texts.forEach(function (text, jtext) {
+		UFX.draw("[ tab left top fs white font 22px~'Mouse~Memoirs' t 3", 3 + 25 * jtext, "ft0", text, "]")
+	})
+	document.getElementById("savebutton").disabled = !tosave
+
+}, null, { minups: 5, maxups: 240 })
+
+
+</script>

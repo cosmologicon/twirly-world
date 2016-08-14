@@ -394,25 +394,9 @@ function getldata(ldata) {
 	}))
 }
 
-function Sphere(p) {
-	this.parameters = [
-		new VectorParameter(this, "p0", [0, 0, 0]),
-		new UnitVectorParameter(this, "a1", [0, 0, 1]),
-		new VectorParameter(this, "p1", [0, 0, 0]),
-		new Parameter(this, "n1", 0),
-		new UnitVectorParameter(this, "a2", [0, 0, 1]),
-		new VectorParameter(this, "p2", p),
-		new Parameter(this, "n2", 10),
-		new Parameter(this, "m", 0),
-		new Parameter(this, "n3", 0),
-		new Parameter(this, "mu", 0),
-		new Parameter(this, "r", 1),
-		new VectorParameter(this, "color", [1, 0.5, 0], ["r", "g", "b"]),
-		new OptionParameter(this, "Nface", 3, [0, 1, 2, 3, 4]),
-		new BooleanParameter(this, "smooth", true),
-	]
-}
-Sphere.prototype = {
+
+
+var PartBasics = {
 	getspec: function () {
 		var spec = {}
 		this.parameters.forEach(function (p) {
@@ -420,41 +404,13 @@ Sphere.prototype = {
 		})
 		return spec
 	},
-	build: function () {
-		var spec = this.getspec()
-		var [points, faces] = isosphere(spec.Nface)
-		var pdata = [], ldata = []
-		faces.forEach(function (face) {
-			if (!spec.smooth) {
-				var verts = face.map(jpoint => points[jpoint])
-				var normal0 = V.norm(V.plus(verts[0], V.plus(verts[1], verts[2])))
-			} else {
-				normal0 = null
-			}
-			var ps = face.map(function (jpoint) {
-				var [x, y, z] = points[jpoint]
-				return {
-					p0: [spec.p0.x, spec.p0.y, spec.p0.z],
-					a1: [spec.a1.x, spec.a1.y, spec.a1.z],
-					n1: spec.n1,
-					p1: [spec.p1.x, spec.p1.y, spec.p1.z],
-					a2: [spec.a2.x, spec.a2.y, spec.a2.z],
-					n2: spec.n2,
-					p2: [
-						spec.p2.x + spec.r * x,
-						spec.p2.y + spec.r * y,
-						spec.p2.z + spec.r * z,
-					],
-					n3: spec.n3,
-					m: spec.m,
-					mu: spec.mu,
-					normal: normal0 || [x, y, z],
-					color: [spec.color.r, spec.color.g, spec.color.b],
-				}
-			})
-			pdata.push(ps[0], ps[1], ps[2])
-			ldata.push(ps[0], ps[1], ps[1], ps[2], ps[2], ps[0])
+	setspec: function (spec) {
+		this.parameters.forEach(function (p) {
+			if (p.name in spec) p.set(spec[p.name])
 		})
+	},
+	build: function () {
+		var [pdata, ldata] = this.getpdata(this.getspec())
 		this.nvert = pdata.length
 		this.nlvert = ldata.length
 		this.data = getpdata(pdata)
@@ -481,10 +437,65 @@ Sphere.prototype = {
 	},
 }
 
+function Sphere(spec) {
+	this.parameters = [
+		new VectorParameter(this, "p0", [0, 0, 0]),
+		new UnitVectorParameter(this, "a1", [0, 0, 1]),
+		new VectorParameter(this, "p1", [0, 0, 0]),
+		new Parameter(this, "n1", 0),
+		new UnitVectorParameter(this, "a2", [0, 0, 1]),
+		new VectorParameter(this, "p2", [0, 0, 0]),
+		new Parameter(this, "n2", 0),
+		new Parameter(this, "m", 0),
+		new Parameter(this, "n3", 0),
+		new Parameter(this, "mu", 0),
+		new Parameter(this, "r", 1),
+		new VectorParameter(this, "color", [1, 0.5, 0], ["r", "g", "b"]),
+		new OptionParameter(this, "Nface", 3, [0, 1, 2, 3, 4]),
+		new BooleanParameter(this, "smooth", true),
+	]
+	if (spec) this.setspec(spec)
+}
+Sphere.prototype = UFX.Thing()
+	.addcomp(PartBasics)
+	.addcomp({
+		getpdata: function (spec) {
+			var [points, faces] = isosphere(spec.Nface)
+			var pdata = [], ldata = []
+			faces.forEach(function (face) {
+				var normal0 = spec.smooth ? null : V.norm(face.map(jpoint => points[jpoint]).reduce(V.plus))
+				var ps = face.map(function (jpoint) {
+					var [x, y, z] = points[jpoint]
+					return {
+						p0: [spec.p0.x, spec.p0.y, spec.p0.z],
+						a1: [spec.a1.x, spec.a1.y, spec.a1.z],
+						n1: spec.n1,
+						p1: [spec.p1.x, spec.p1.y, spec.p1.z],
+						a2: [spec.a2.x, spec.a2.y, spec.a2.z],
+						n2: spec.n2,
+						p2: [
+							spec.p2.x + spec.r * x,
+							spec.p2.y + spec.r * y,
+							spec.p2.z + spec.r * z,
+						],
+						n3: spec.n3,
+						m: spec.m,
+						mu: spec.mu,
+						normal: normal0 || [x, y, z],
+						color: [spec.color.r, spec.color.g, spec.color.b],
+					}
+				})
+				pdata.push(ps[0], ps[1], ps[2])
+				ldata.push(ps[0], ps[1], ps[1], ps[2], ps[2], ps[0])
+			})
+		},
+	})
+
+
 var parts = [
-	new Sphere([0, 0, 0]),
-	new Sphere([4, 0, 0]),
-	new Sphere([0, 4, 0]),
+	new Sphere(),
+	new Sphere({p2: [4, 0, 0] }),
+	new Sphere({p2: [0, 4, 0], n2: 10 }),
 ]
 parts.forEach(function (part) {
 	part.build()
