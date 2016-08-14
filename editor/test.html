@@ -78,7 +78,7 @@ void main() {
 precision highp float;
 varying vec3 tnormal, tcolor;
 
-const vec3 lightpos = normalize(vec3(1.0, 1.0, 1.0));
+const vec3 lightpos = normalize(vec3(-1.0, 1.0, -1.0));
 const bool renormalize = true;
 const float alpha = 8.0;
 void main() {
@@ -269,7 +269,7 @@ var HasVectorValue = {
 			var label = document.createElement("label")
 			label.appendChild(document.createTextNode(this.components[j] + ": "))
 			label.appendChild(input)
-			this.element.appendChild(label)
+			element.appendChild(label)
 			if (j < this.length - 1) {
 				element.appendChild(document.createTextNode(" "))
 			}
@@ -292,6 +292,31 @@ var HasVectorValue = {
 		return this.components.map(c => this.value[c])
 	},
 }
+var HasProfileValue = {
+	fillelement: function (element) {
+		element.appendChild(document.createTextNode(this.name + ": "))
+		var savebutton = document.createElement("button")
+		savebutton.innerHTML = "save"
+		savebutton.onclick = this.save.bind(this)
+		element.appendChild(savebutton)
+		element.appendChild(document.createTextNode(" "))
+		var loadbutton = document.createElement("button")
+		loadbutton.innerHTML = "load"
+		loadbutton.onclick = this.load.bind(this)
+		element.appendChild(loadbutton)
+	},
+	load: function () {
+		this.value = JSON.parse(localStorage.twedprofile)
+		this.update()
+	},
+	save: function () {
+		localStorage.twedprofile = JSON.stringify(this.value)
+	},
+	set: function (value) {
+		this.value = value
+	},
+}
+
 var HasNormalizeButton = {
 	setnorm: function () {
 		this.set(V.norm(this.asvector()))
@@ -362,6 +387,17 @@ function UnitVectorParameter(owner, name, value, components) {
 UnitVectorParameter.prototype = UFX.Thing()
 	.addcomp(HasVectorValue)
 	.addcomp(HasNormalizeButton)
+	.addcomp(Attachable)
+	.addcomp(HasOwner)
+
+function ProfileParameter(owner, name, value) {
+	this.name = name
+	this.build()
+	this.set(value || null)
+	this.owner = owner
+}
+ProfileParameter.prototype = UFX.Thing()
+	.addcomp(HasProfileValue)
 	.addcomp(Attachable)
 	.addcomp(HasOwner)
 
@@ -488,14 +524,127 @@ Sphere.prototype = UFX.Thing()
 				pdata.push(ps[0], ps[1], ps[2])
 				ldata.push(ps[0], ps[1], ps[1], ps[2], ps[2], ps[0])
 			})
+			return [pdata, ldata]
 		},
 	})
 
+function ProfilePart(spec) {
+	this.parameters = [
+		new VectorParameter(this, "p0", [0, 0, 0]),
+		new UnitVectorParameter(this, "a1", [0, 0, 1]),
+		new VectorParameter(this, "p1", [0, 0, 0]),
+		new Parameter(this, "n1", 0),
+		new UnitVectorParameter(this, "a2", [0, 0, 1]),
+		new VectorParameter(this, "p2", [0, 0, 0]),
+		new Parameter(this, "n2", 0),
+		new Parameter(this, "m", 0),
+		new Parameter(this, "n3", 0),
+		new Parameter(this, "mu", 0),
+		new UnitVectorParameter(this, "axis", [0, 0, 1]),
+		new Parameter(this, "Nsection", 8),
+		new BooleanParameter(this, "longsmooth", true),
+		new ProfileParameter(this, "profile"),
+	]
+	if (spec) this.setspec(spec)
+}
+ProfilePart.prototype = UFX.Thing()
+	.addcomp(PartBasics)
+	.addcomp({
+		getpdata: function (spec) {
+			var verts = spec.profile.verts, palette = spec.profile.palette
+			var fnormals = []
+			for (var j = 0 ; j < verts.length - 1 ; ++j) {
+				var vert0 = verts[j], vert1 = verts[j + 1]
+				var dx = vert1.x - vert0.x, dy = vert1.y - vert0.y
+				fnormals.push(dx || dy ? V.norm([dy, 0, -dx]) : [1, 0, 0])
+			}
+			var snormals = [fnormals[0]]
+			for (var j = 0 ; j < fnormals.length - 1 ; ++j) {
+				snormals.push(V.norm(V.plus(fnormals[j], fnormals[j + 1])))
+			}
+			snormals.push(fnormals[fnormals.length - 1])
+
+			var ps = [], ls = []
+			for (var j = 0 ; j < verts.length - 1 ; ++j) {
+				var vert0 = verts[j], vert1 = verts[j + 1]
+				var xps = [vert0.x, vert1.x]
+				var yps = [vert0.y, vert1.y]
+				var colors = [palette[vert0.jcolor1], palette[vert1.jcolor0]]
+				var normals = [
+					vert0.smooth ? snormals[j] : fnormals[j],
+					vert1.smooth ? snormals[j + 1] : fnormals[j],
+				]
+				for (var k = 0 ; k < spec.Nsection ; ++k) {
+					var phis = [k * tau / spec.Nsection, (k + 1) * tau / spec.Nsection]
+					phis[0.5] = (phis[0] + phis[1]) / 2
+					var pface = {}
+					for (var u = 0 ; u < 2 ; ++u) {
+						for (var v = 0 ; v < 2 ; ++v) {
+							var S = Math.sin(phis[v]), C = Math.cos(phis[v])
+							var nphi = spec.longsmooth ? phis[v] : phis[0.5]
+							var nS = Math.sin(nphi), nC = Math.cos(nphi)
+							var normal = normals[u]
+							pface[[u, v]] = {
+								p: [xps[u] * C, xps[u] * S, yps[u]],
+								normal: [normal[0] * nC, normal[0] * nS, normal[2]],
+								color: colors[u],
+							}
+						}
+					}
+					ps.push(pface[[0, 0]], pface[[0, 1]], pface[[1, 1]],
+						pface[[0, 0]], pface[[1, 1]], pface[[1, 0]])
+					ls.push(pface[[0, 0]], pface[[0, 1]], pface[[0, 1]], pface[[1, 1]],
+						pface[[1, 1]], pface[[1, 0]], pface[[1, 0]], pface[[0, 0]])
+				}
+			}
+			var zhat = [spec.axis.x, spec.axis.y, spec.axis.z]
+			var xhat = V.cross(zhat, V.k)
+			xhat = V.dot(xhat, xhat) ? V.norm(xhat) : V.i
+			var yhat = V.cross(zhat, xhat)
+			var Mbasis = M3.basisfromVs(xhat, yhat, zhat)
+			function remap(p) {
+				var dp = M3.timesV(Mbasis, p.p)
+				return {
+					p0: [spec.p0.x, spec.p0.y, spec.p0.z],
+					a1: [spec.a1.x, spec.a1.y, spec.a1.z],
+					n1: spec.n1,
+					p1: [spec.p1.x, spec.p1.y, spec.p1.z],
+					a2: [spec.a2.x, spec.a2.y, spec.a2.z],
+					n2: spec.n2,
+					p2: [
+						spec.p2.x + dp[0],
+						spec.p2.y + dp[1],
+						spec.p2.z + dp[2],
+					],
+					n3: spec.n3,
+					m: spec.m,
+					mu: spec.mu,
+					normal: M3.timesV(Mbasis, p.normal),
+					color: p.color,
+				}
+			}
+			var pdata = ps.map(remap)
+			var ldata = ls.map(remap)
+			return [pdata, ldata]
+		},
+	})
+function newCylinder() {
+	return new ProfilePart({
+		profile: {
+			palette: [[0.6, 0.6, 0.6]],
+			verts: [
+				{ x: 0, y: 0, jcolor0: 0, jcolor1: 0, smooth: false },
+				{ x: 1, y: 0, jcolor0: 0, jcolor1: 0, smooth: false },
+				{ x: 1, y: 1, jcolor0: 0, jcolor1: 0, smooth: false },
+				{ x: 0, y: 1, jcolor0: 0, jcolor1: 0, smooth: false },
+			],
+		},
+	})
+}
+
 
 var parts = [
-	new Sphere(),
-	new Sphere({p2: [4, 0, 0] }),
-	new Sphere({p2: [0, 4, 0], n2: 10 }),
+	newCylinder(),
 ]
 parts.forEach(function (part) {
 	part.build()

@@ -105,6 +105,9 @@ var M3 = {
 		for (var j = 2 ; j < arguments.length ; ++j) nargs.push(arguments[j])
 		return M3.times.apply(M3, nargs)
 	},
+	basisfromVs: function (i, j, k) {
+		return [i[0], i[1], i[2], j[0], j[1], j[2], k[0], k[1], k[2]]
+	},
 	timesV: function (M, v) {
 		return [
 			M[0] * v[0] + M[3] * v[1] + M[6] * v[2],

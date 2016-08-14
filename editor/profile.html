@@ -66,7 +66,7 @@ var canvas = document.getElementById("canvas")
 canvas.width = canvas.height = 700
 var context = canvas.getContext("2d")
 UFX.key.init()
-UFX.key.watchlist = "tab space x z 0 1 2 up down left right shift".split(" ")
+UFX.key.watchlist = "tab space X Z 0 1 2 up down left right shift".split(" ")
 UFX.key.remaparrows(true)
 UFX.mouse.init(canvas)
 UFX.mouse.capture.middle = true
@@ -168,11 +168,11 @@ UFX.ticker.init(function (dt) {
 			Z = -2
 		}
 		if (svert) {
-			if (kstate.down.z) {
+			if (kstate.down.Z) {
 				svert.smooth = !svert.smooth
 				tosave = true
 			}
-			if (kstate.down.x) {
+			if (kstate.down.X) {
 				verts.splice(jselected, 1)
 				if (jselected >= verts.length) jselected = null
 				tosave = true
